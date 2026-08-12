@@ -1068,6 +1068,20 @@ CSS = """
   .ko-big .s { font-size:12px; color:#5c7085; }
   .ko-req label p { font-weight:600 !important; }
   div[data-testid="stForm"] { border-color:#dbe3ea; }
+
+  /* Dropdowns: white text on a dark control so the selection reads clearly on
+     mobile. Scoped to the CLOSED select box only — the open option list below
+     stays dark-on-white so it never becomes white-on-white. */
+  div[data-baseweb="select"] > div {
+    background:#0f2233 !important;
+    border-color:#0f2233 !important;
+  }
+  div[data-baseweb="select"] > div * { color:#ffffff !important; }
+  div[data-baseweb="select"] svg { fill:#ffffff !important; color:#ffffff !important; }
+  div[data-baseweb="select"] input { color:#ffffff !important; caret-color:#ffffff; }
+  /* the popover menu of options keeps dark text on a white background */
+  ul[data-baseweb="menu"] li { color:#0f2233 !important; }
+  ul[data-baseweb="menu"] { background:#ffffff !important; }
 </style>
 """
 
@@ -1111,19 +1125,60 @@ def show_schedule(rows, currency, caption):
         )
 
 
+def png_to_jpg(png_bytes, quality=92):
+    """Flatten PNG onto white and re-encode as JPEG (no alpha; iOS-friendly)."""
+    from PIL import Image
+    im = Image.open(io.BytesIO(png_bytes))
+    if im.mode in ("RGBA", "LA", "P"):
+        bg = Image.new("RGB", im.size, "white")
+        im = im.convert("RGBA")
+        bg.paste(im, mask=im.split()[-1])
+        im = bg
+    else:
+        im = im.convert("RGB")
+    out = io.BytesIO()
+    im.save(out, format="JPEG", quality=quality, subsampling=0, optimize=True)
+    return out.getvalue()
+
+
+def export_with_preview(png_bytes, filename_stem):
+    """
+    Render the export as an on-page preview plus a JPG download.
+
+    The inline image matters on iPhone: mobile Safari often ignores a normal
+    download, but a visible image can be long-pressed and saved straight to
+    Photos. Desktop users can use the download button as usual.
+    """
+    jpg = png_to_jpg(png_bytes)
+    import base64
+    b64 = base64.b64encode(jpg).decode("ascii")
+    st.markdown(
+        f'<img src="data:image/jpeg;base64,{b64}" '
+        'style="width:100%;border:1px solid #dbe3ea;border-radius:8px;margin:6px 0;" '
+        'alt="Pratinjau simulasi" />',
+        unsafe_allow_html=True,
+    )
+    st.caption(
+        "📱 iPhone/iPad: tekan lama (long-press) gambar di atas, lalu pilih "
+        "**Save to Photos** untuk menyimpan sebagai JPG. "
+        "💻 Komputer: gunakan tombol unduh di bawah."
+    )
+    st.download_button(
+        "Unduh gambar (JPG)",
+        data=jpg,
+        file_name=f"{filename_stem}-{dt.date.today():%Y-%m-%d}.jpg",
+        mime="image/jpeg",
+        use_container_width=True,
+    )
+
+
 def download(name, sections, title, subtitle):
     try:
         png = render_png(title, subtitle, sections, DISCLAIMER)
     except Exception as exc:  # noqa: BLE001 - surfaced to the user below
         st.warning(f"Gambar tidak dapat dibuat: {exc}")
         return
-    st.download_button(
-        "Simpan simulasi sebagai gambar",
-        data=png,
-        file_name=f"simulasi-obligasi-{name}-{dt.date.today():%Y-%m-%d}.png",
-        mime="image/png",
-        use_container_width=True,
-    )
+    export_with_preview(png, f"simulasi-obligasi-{name}")
 
 
 # ===========================================================================
@@ -1197,13 +1252,7 @@ def tab_beli():
                 txn_serial=to_serial(txn), settle_serial=to_serial(settle),
                 nominal=nominal, price_pct=price_in,
             )
-            st.download_button(
-                "Simpan simulasi sebagai gambar",
-                data=png,
-                file_name=f"simulasi-beli-{code}-{dt.date.today():%Y-%m-%d}.png",
-                mime="image/png",
-                use_container_width=True,
-            )
+            export_with_preview(png, f"simulasi-beli-{code}")
         except Exception as exc:  # noqa: BLE001 - surfaced to the user
             st.warning(f"Gambar tidak dapat dibuat: {exc}")
 
