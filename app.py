@@ -736,6 +736,41 @@ def parse_number(text):
         return None
 
 
+def _full_width():
+    """
+    Return the kwargs that make a widget span its container, tolerant of the
+    Streamlit version. Newer builds prefer width='stretch'; older ones only
+    understand use_container_width=True. Picking at runtime avoids a hard
+    break whichever version Streamlit Cloud resolves.
+    """
+    import inspect
+    try:
+        params = inspect.signature(st.button).parameters
+        if "width" in params:
+            return {"width": "stretch"}
+    except (ValueError, TypeError):
+        pass
+    return {"use_container_width": True}
+
+
+FULL_WIDTH = _full_width()
+
+
+def money_input(label, default, key, cur_hint="Rp"):
+    """
+    Text input for a nominal amount that echoes the parsed value back in
+    grouped form (Rp 200.000.000) so the RM can confirm the zero count at a
+    glance. Returns the raw string; caller runs parse_number.
+    """
+    raw = st.text_input(label, default, key=key)
+    val = parse_number(raw)
+    if val is not None:
+        st.caption(f"= {cur_hint} {val:,.0f}".replace(",", "."))
+    elif raw.strip():
+        st.caption("⚠️ Angka tidak dikenali")
+    return raw
+
+
 # ---------------------------------------------------------------------------
 # PNG export. Drawn server-side with matplotlib so the download works
 # identically on every browser and needs no client-side capture library.
@@ -776,7 +811,7 @@ def render_png(title, subtitle, sections, footer_lines):
     ax.text(left + 0.20, y, "KALKULATOR OBLIGASI", fontsize=7.5, color=MUTED,
             family=SANS, weight="bold", va="center")
     y -= 0.34
-    ax.text(left + 0.20, y, title, fontsize=15, color=INK, family=SANS,
+    ax.text(left + 0.20, y, title.upper(), fontsize=15, color=INK, family=SANS,
             weight="bold", va="center")
     ax.text(right, y, subtitle, fontsize=8, color=MUTED, family=MONO,
             ha="right", va="center")
@@ -849,14 +884,16 @@ def _paren(v):
     return f"({body})" if v < 0 else body
 
 
-def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, price_pct):
+def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, price_pct,
+                       sim_title="SIMULASI BELI"):
     cur = r["meta"].currency
     meta = r["meta"]
     sched = r["schedule"]
 
     W = 12.4
     disc_h = 0.26 + len(DISCLAIMER_FULL) * 0.208 + 0.14
-    H = 8.55 + disc_h
+    title_h = 0.50
+    H = 8.55 + disc_h + title_h
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
     ax = fig.add_axes([0, 0, 1, 1])
@@ -877,6 +914,15 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
     def bar(x, y, w, h, label):
         ax.add_patch(plt.Rectangle((x, y - h), w, h, facecolor=_EX_BLACK, edgecolor="none", zorder=2))
         text(x + w / 2, y - h / 2, label, size=11, color="white", weight="bold", ha="center")
+
+    # ---- title band (full width) ----
+    ax.text(ML, top - 0.02, sim_title, fontsize=17, color=INK, weight="bold",
+            family=SANS, ha="left", va="top")
+    ax.text(W - MR, top - 0.10, "Kalkulator Obligasi",
+            fontsize=9.5, color=MUTED, family=SANS, ha="right", va="top")
+    ax.plot([ML, W - MR], [top - title_h + 0.06, top - title_h + 0.06],
+            color=INK, lw=1.6)
+    top -= title_h + 0.14
 
     # ---- left column ----
     y = top
@@ -916,7 +962,7 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
     y -= 0.16
 
     for lab, val in [
-        ("Imbal Hasil hingga JT / Yield To Maturity (gross)", pct(r["ytm"], 3)),
+        ("Imbal Hasil hingga JT / Yield To Maturity (gross)", pct(r["ytm"], 4)),
         ("Hari Kupon Berjalan / Days of Accrued Interest", num(r["accrued_days"])),
         ("Kupon Berjalan / Accrued Interest", _paren(r["accrued_interest"])),
     ]:
@@ -1069,6 +1115,12 @@ CSS = """
   .ko-req label p { font-weight:600 !important; }
   div[data-testid="stForm"] { border-color:#dbe3ea; }
 
+  /* Streamlit renders each st.markdown as its own block; an opening <div> with
+     no text becomes an empty bordered box. Collapse those stray empties. */
+  div[data-testid="stMarkdownContainer"]:empty { display:none; }
+  .ko-card:empty { display:none; }
+  .stDivider { margin:0.4rem 0; }
+
   /* Dropdowns: white text on a dark control so the selection reads clearly on
      mobile. Scoped to the CLOSED select box only — the open option list below
      stays dark-on-white so it never becomes white-on-white. */
@@ -1093,6 +1145,32 @@ def row(label, value, tone=None, indent=False, strong=False):
                 f'<span class="{vcls}">{value}</span></div>', unsafe_allow_html=True)
 
 
+def _row_html(label, value, tone=None, indent=False, strong=False):
+    cls = "ko-row" + (" ko-ind" if indent else "") + (" ko-strong" if strong else "")
+    vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
+    return f'<div class="{cls}"><span>{label}</span><span class="{vcls}">{value}</span></div>'
+
+
+def card(heading, rows):
+    """
+    Render a whole card — heading + every row — in ONE markdown call, so the
+    styled border actually wraps its content instead of leaving an empty box
+    (a limitation of splitting the opening/closing <div> across st.markdown).
+    rows: list of (label, value, tone, indent, strong) tuples; tone/indent/
+    strong are optional per tuple.
+    """
+    parts = []
+    for r in rows:
+        label = r[0]
+        value = r[1]
+        tone = r[2] if len(r) > 2 else None
+        indent = r[3] if len(r) > 3 else False
+        strong = r[4] if len(r) > 4 else False
+        parts.append(_row_html(label, value, tone, indent, strong))
+    head = f'<div class="ko-cap" style="margin-bottom:6px">{heading}</div>' if heading else ""
+    st.markdown(f'<div class="ko-card">{head}{"".join(parts)}</div>', unsafe_allow_html=True)
+
+
 def big(label, value, sub="", tone=None):
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     st.markdown(f'<div class="ko-big"><span class="l">{label}</span>'
@@ -1113,16 +1191,18 @@ def show_meta(meta: Meta):
 
 
 def show_schedule(rows, currency, caption):
+    st.markdown(f'<div class="ko-cap">{caption}'
+                f'{"" if not rows else f" — {len(rows)} pembayaran"}</div>',
+                unsafe_allow_html=True)
     if not rows:
         st.caption("Tidak ada pembayaran kupon dalam periode ini.")
         return
-    with st.expander(f"{caption} — {len(rows)} pembayaran"):
-        st.dataframe(
-            {"#": [r[0] for r in rows],
-             "Tanggal": [fmt_date_short(r[1]) for r in rows],
-             "Kupon nett": [money(r[2], currency) for r in rows]},
-            hide_index=True, use_container_width=True,
-        )
+    st.dataframe(
+        {"#": [r[0] for r in rows],
+         "Tanggal": [fmt_date_short(r[1]) for r in rows],
+         "Kupon nett": [money(r[2], currency) for r in rows]},
+        hide_index=True, height=min(38 + len(rows) * 35, 460), **FULL_WIDTH,
+    )
 
 
 def png_to_jpg(png_bytes, quality=92):
@@ -1141,16 +1221,41 @@ def png_to_jpg(png_bytes, quality=92):
     return out.getvalue()
 
 
-def export_with_preview(png_bytes, filename_stem):
-    """
-    Render the export as an on-page preview plus a JPG download.
+def export_filename(sim_label, seri):
+    """SIMULASI BELI_FR0110_14-Aug-2026 — the naming convention the desk uses."""
+    stamp = f"{dt.date.today():%d-%b-%Y}"
+    safe = "".join(c for c in f"{sim_label}_{seri}_{stamp}" if c not in '\\/:*?"<>|')
+    return f"{safe}.jpg"
 
-    The inline image matters on iPhone: mobile Safari often ignores a normal
-    download, but a visible image can be long-pressed and saved straight to
-    Photos. Desktop users can use the download button as usual.
+
+def export_section(png_factory, sim_label, seri, state_key):
     """
-    jpg = png_to_jpg(png_bytes)
+    Build-on-demand export. The heavy image is only rendered once the RM taps
+    the button, so the normal working view stays a single clean results panel
+    rather than the same simulation printed twice. After the first tap the
+    preview persists (session state) so re-runs from other inputs don't hide it.
+
+    png_factory: zero-arg callable returning PNG bytes.
+    """
     import base64
+
+    made = st.session_state.get(state_key, False)
+    label = "Perbarui gambar" if made else "Buat gambar untuk dibagikan"
+    if st.button(label, key=f"{state_key}_btn", type="primary", **FULL_WIDTH):
+        made = True
+        st.session_state[state_key] = True
+
+    if not made:
+        st.caption("Tekan tombol di atas untuk membuat gambar simulasi yang bisa "
+                   "diunduh atau dibagikan ke nasabah.")
+        return
+
+    try:
+        jpg = png_to_jpg(png_factory())
+    except Exception as exc:  # noqa: BLE001 - surfaced to the user
+        st.warning(f"Gambar tidak dapat dibuat: {exc}")
+        return
+
     b64 = base64.b64encode(jpg).decode("ascii")
     st.markdown(
         f'<img src="data:image/jpeg;base64,{b64}" '
@@ -1166,19 +1271,10 @@ def export_with_preview(png_bytes, filename_stem):
     st.download_button(
         "Unduh gambar (JPG)",
         data=jpg,
-        file_name=f"{filename_stem}-{dt.date.today():%Y-%m-%d}.jpg",
+        file_name=export_filename(sim_label, seri),
         mime="image/jpeg",
-        use_container_width=True,
+        **FULL_WIDTH,
     )
-
-
-def download(name, sections, title, subtitle):
-    try:
-        png = render_png(title, subtitle, sections, DISCLAIMER)
-    except Exception as exc:  # noqa: BLE001 - surfaced to the user below
-        st.warning(f"Gambar tidak dapat dibuat: {exc}")
-        return
-    export_with_preview(png, f"simulasi-obligasi-{name}")
 
 
 # ===========================================================================
@@ -1196,11 +1292,13 @@ def tab_beli():
         market = st.selectbox("Jenis transaksi", ["Pasar Sekunder", "Pasar Perdana"], key="b_market")
         txn = st.date_input("Tanggal transaksi", dt.date.today() - dt.timedelta(days=2),
                             min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="b_txn",
-                            help="Tanggal order. Ditampilkan pada gambar; setelmen yang dipakai untuk hitungan.")
+                            help="Tanggal order nasabah. Hanya ditampilkan pada gambar.")
         settle = st.date_input("Tanggal setelmen", dt.date.today(),
-                               min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="b_settle")
-        nominal = parse_number(st.text_input("Nilai nominal", "200.000.000", key="b_nominal"))
-        price_in = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.01,
+                               min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="b_settle",
+                               help="Tanggal setelmen inilah yang dipakai untuk menghitung "
+                                    "kupon berjalan, YTM, dan seluruh proyeksi.")
+        nominal = parse_number(money_input("Nilai nominal", "200.000.000", "b_nominal", cur_hint="Rp"))
+        price_in = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05,
                                    format="%.4f", key="b_price")
 
     try:
@@ -1213,15 +1311,14 @@ def tab_beli():
 
     cur = r["meta"].currency
     with left:
-        st.markdown('<div class="ko-card">', unsafe_allow_html=True)
-        st.markdown('<div class="ko-cap">Rincian pembelian</div>', unsafe_allow_html=True)
-        row("Tanggal kupon terakhir", "N/A" if r["is_perdana"] else fmt_date(r["last_coupon"]))
-        row("Tanggal kupon berikutnya", fmt_date(r["next_coupon"]))
-        row("Hari kupon berjalan", f"{num(r['accrued_days'])} hari")
-        row("Kupon berjalan", money(r["accrued_interest"], cur))
-        row("Imbal hasil hingga JT (gross)", pct(r["ytm"], 4))
-        row("Jumlah indikatif dibayar", money(r["amount_paid"], cur), strong=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        card("Rincian pembelian", [
+            ("Tanggal kupon terakhir", "N/A" if r["is_perdana"] else fmt_date(r["last_coupon"])),
+            ("Tanggal kupon berikutnya", fmt_date(r["next_coupon"])),
+            ("Hari kupon berjalan", f"{num(r['accrued_days'])} hari"),
+            ("Kupon berjalan", money(r["accrued_interest"], cur)),
+            ("Imbal hasil hingga JT (gross)", pct(r["ytm"], 4)),
+            ("Jumlah indikatif dibayar", money(r["amount_paid"], cur), None, False, True),
+        ])
 
     with right:
         st.markdown('<div class="ko-cap">Proyeksi pendapatan (nett)</div>', unsafe_allow_html=True)
@@ -1233,28 +1330,29 @@ def tab_beli():
         with b:
             big("Pengembalian hingga JT", money(r["proceeds_at_maturity"], cur),
                 f"{num(r['periods'])} periode · {num(r['months'])} bulan")
-        st.markdown('<div class="ko-card">', unsafe_allow_html=True)
-        row("Kupon diterima hingga JT", money(r["coupon_to_maturity"], cur))
-        row("Nominal diterima saat JT", money(r["received_at_maturity"], cur))
-        row("Pengembalian pokok", money(r["principal_back"], cur), indent=True)
-        row("Kupon saat JT (gross)", money(r["final_coupon_gross"], cur), indent=True)
-        row("Capital gain / loss", money(r["capital_gain"], cur),
-            tone_of(r["capital_gain"]), indent=True)
-        row("Total pajak", money(r["total_tax"], cur), indent=True)
-        row("Pajak kupon", money(r["last_coupon_tax"], cur), indent=True)
-        row("Pajak capital gain", money(r["capital_gain_tax"], cur), indent=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        show_schedule(r["schedule"], cur, "Jadwal kupon")
+        card(None, [
+            ("Kupon diterima hingga JT", money(r["coupon_to_maturity"], cur)),
+            ("Nominal diterima saat JT", money(r["received_at_maturity"], cur)),
+            ("Pengembalian pokok", money(r["principal_back"], cur), None, True),
+            ("Kupon saat JT (gross)", money(r["final_coupon_gross"], cur), None, True),
+            ("Capital gain / loss", money(r["capital_gain"], cur), tone_of(r["capital_gain"]), True),
+            ("Total pajak", money(r["total_tax"], cur), None, True),
+            ("Pajak kupon", money(r["last_coupon_tax"], cur), None, True),
+            ("Pajak capital gain", money(r["capital_gain_tax"], cur), None, True),
+        ])
 
-        try:
-            png = render_beli_export(
-                r, code=code, market=market,
-                txn_serial=to_serial(txn), settle_serial=to_serial(settle),
-                nominal=nominal, price_pct=price_in,
-            )
-            export_with_preview(png, f"simulasi-beli-{code}")
-        except Exception as exc:  # noqa: BLE001 - surfaced to the user
-            st.warning(f"Gambar tidak dapat dibuat: {exc}")
+    # ---- schedule (full width, not collapsed) ----
+    show_schedule(r["schedule"], cur, "Jadwal kupon")
+
+    # ---- export section, at the bottom ----
+    st.divider()
+    st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
+    export_section(
+        lambda: render_beli_export(
+            r, code=code, market=market,
+            txn_serial=to_serial(txn), settle_serial=to_serial(settle),
+            nominal=nominal, price_pct=price_in, sim_title="SIMULASI BELI"),
+        "SIMULASI BELI", code, "b_export")
 
 
 def tab_jual():
@@ -1268,13 +1366,13 @@ def tab_jual():
         show_meta(meta)
         buy_settle = st.date_input("Tanggal setelmen beli", dt.date.today() - dt.timedelta(days=365),
                                    min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="j_bs")
-        nominal = parse_number(st.text_input("Nilai nominal", "200.000.000", key="j_nominal"))
-        buy_price = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.01,
+        nominal = parse_number(money_input("Nilai nominal", "200.000.000", "j_nominal"))
+        buy_price = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05,
                                     format="%.4f", key="j_bp")
         st.markdown('<div class="ko-cap">Saat nasabah jual</div>', unsafe_allow_html=True)
         sell_settle = st.date_input("Tanggal setelmen jual", dt.date.today(),
                                     min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="j_ss")
-        sell_price = st.number_input("Harga nasabah jual (%)", value=99.00, step=0.01,
+        sell_price = st.number_input("Harga nasabah jual (%)", value=99.00, step=0.05,
                                      format="%.4f", key="j_sp")
 
     try:
@@ -1287,12 +1385,12 @@ def tab_jual():
 
     cur = r["meta"].currency
     with left:
-        st.markdown('<div class="ko-card">', unsafe_allow_html=True)
-        row("Hari kupon berjalan", f"{num(r['sell_accrued_days'])} hari")
-        row("Kupon berjalan (gross)", money(r["sell_accrued"], cur))
-        row("Capital gain / loss (gross)", money(r["capital_gain"], cur), tone_of(r["capital_gain"]))
-        row("Jumlah indikatif diterima (nett)", money(r["net_proceeds"], cur), strong=True)
-        st.markdown("</div>", unsafe_allow_html=True)
+        card("Rincian penjualan", [
+            ("Hari kupon berjalan", f"{num(r['sell_accrued_days'])} hari"),
+            ("Kupon berjalan (gross)", money(r["sell_accrued"], cur)),
+            ("Capital gain / loss (gross)", money(r["capital_gain"], cur), tone_of(r["capital_gain"])),
+            ("Jumlah indikatif diterima (nett)", money(r["net_proceeds"], cur), None, False, True),
+        ])
 
     with right:
         st.markdown('<div class="ko-cap">Jika dijual sebelum jatuh tempo</div>', unsafe_allow_html=True)
@@ -1315,39 +1413,46 @@ def tab_jual():
             big("Pengembalian diterima", money(r["proceeds_if_held"], cur),
                 f"imbal hasil {pct(r['ytm_hold'], 4)}")
 
-        st.markdown('<div class="ko-card">', unsafe_allow_html=True)
-        row("Jumlah indikatif dibayar saat beli", money(r["amount_paid"], cur))
-        row("Total kupon telah diterima", money(r["coupon_to_sale"], cur))
-        row("Total pajak saat jual", money(r["total_tax"], cur))
-        st.markdown("</div>", unsafe_allow_html=True)
-        show_schedule(r["schedule"], cur, "Jadwal kupon hingga penjualan")
+        card(None, [
+            ("Jumlah indikatif dibayar saat beli", money(r["amount_paid"], cur)),
+            ("Total kupon telah diterima", money(r["coupon_to_sale"], cur)),
+            ("Total pajak saat jual", money(r["total_tax"], cur)),
+        ])
 
-        download("jual", [
-            ("Data transaksi", [
-                ("Kode obligasi", code, None, False),
-                ("Setelmen beli", fmt_date(to_serial(buy_settle)), None, False),
-                ("Harga beli", f"{buy_price:.4f}%", None, False),
-                ("Setelmen jual", fmt_date(to_serial(sell_settle)), None, False),
-                ("Harga jual", f"{sell_price:.4f}%", None, False),
-                ("Nilai nominal", money(nominal, cur), None, False),
-            ]),
-            ("Jika dijual sebelum jatuh tempo", [
-                ("Jumlah dibayar saat beli", money(r["amount_paid"], cur), None, False),
-                ("Jumlah diterima (nett)", money(r["net_proceeds"], cur), None, False),
-                ("Total kupon diterima", money(r["coupon_to_sale"], cur), None, False),
-                ("Capital gain / loss", money(r["capital_gain"], cur), tone_of(r["capital_gain"]), True),
-                ("Lama investasi", f"{num(r['months_if_sold'])} bulan", None, True),
-                ("Total keuntungan", money(r["gain_if_sold"], cur), tone_of(r["gain_if_sold"]), False),
-                ("Persentase kumulatif", pct(r["pct_if_sold"]), "strong", False),
-            ]),
-            ("Jika ditahan hingga jatuh tempo", [
-                ("Pengembalian diterima", money(r["proceeds_if_held"], cur), None, False),
-                ("Imbal hasil (gross)", pct(r["ytm_hold"], 4), None, False),
-                ("Lama investasi", f"{num(r['months_if_held'])} bulan", None, True),
-                ("Total keuntungan", money(r["gain_if_held"], cur), tone_of(r["gain_if_held"]), False),
-                ("Persentase kumulatif", pct(r["pct_if_held"]), "strong", False),
-            ]),
-        ], "Simulasi Jual", f"{code} · {dt.date.today():%d/%m/%Y}")
+    show_schedule(r["schedule"], cur, "Jadwal kupon hingga penjualan")
+
+    st.divider()
+    st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
+    sections = [
+        ("Data transaksi", [
+            ("Kode obligasi", code, None, False),
+            ("Setelmen beli", fmt_date(to_serial(buy_settle)), None, False),
+            ("Harga beli", f"{buy_price:.4f}%", None, False),
+            ("Setelmen jual", fmt_date(to_serial(sell_settle)), None, False),
+            ("Harga jual", f"{sell_price:.4f}%", None, False),
+            ("Nilai nominal", money(nominal, cur), None, False),
+        ]),
+        ("Jika dijual sebelum jatuh tempo", [
+            ("Jumlah dibayar saat beli", money(r["amount_paid"], cur), None, False),
+            ("Jumlah diterima (nett)", money(r["net_proceeds"], cur), None, False),
+            ("Total kupon diterima", money(r["coupon_to_sale"], cur), None, False),
+            ("Capital gain / loss", money(r["capital_gain"], cur), tone_of(r["capital_gain"]), True),
+            ("Lama investasi", f"{num(r['months_if_sold'])} bulan", None, True),
+            ("Total keuntungan", money(r["gain_if_sold"], cur), tone_of(r["gain_if_sold"]), False),
+            ("Persentase kumulatif", pct(r["pct_if_sold"]), "strong", False),
+        ]),
+        ("Jika ditahan hingga jatuh tempo", [
+            ("Pengembalian diterima", money(r["proceeds_if_held"], cur), None, False),
+            ("Imbal hasil (gross)", pct(r["ytm_hold"], 4), None, False),
+            ("Lama investasi", f"{num(r['months_if_held'])} bulan", None, True),
+            ("Total keuntungan", money(r["gain_if_held"], cur), tone_of(r["gain_if_held"]), False),
+            ("Persentase kumulatif", pct(r["pct_if_held"]), "strong", False),
+        ]),
+    ]
+    export_section(
+        lambda: render_png("Simulasi Jual", f"{code} · {dt.date.today():%d/%m/%Y}",
+                           sections, DISCLAIMER),
+        "SIMULASI JUAL", code, "j_export")
 
 
 def tab_switching():
@@ -1360,12 +1465,12 @@ def tab_switching():
         show_meta(product_meta(code1))
         bs1 = st.date_input("Setelmen beli Produk 1", dt.date.today() - dt.timedelta(days=365),
                             min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_bs1")
-        nom1 = parse_number(st.text_input("Nilai nominal Produk 1", "200.000.000", key="s_n1"))
-        bp1 = st.number_input("Harga beli Produk 1 (%)", value=100.61, step=0.01, format="%.4f", key="s_bp1")
+        nom1 = parse_number(money_input("Nilai nominal Produk 1", "200.000.000", "s_n1"))
+        bp1 = st.number_input("Harga beli Produk 1 (%)", value=100.61, step=0.05, format="%.4f", key="s_bp1")
         st.markdown('<div class="ko-cap">Produk 1 — jual</div>', unsafe_allow_html=True)
         ss1 = st.date_input("Setelmen jual Produk 1", dt.date.today(),
                             min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_ss1")
-        sp1 = st.number_input("Harga jual Produk 1 (%)", value=99.00, step=0.01, format="%.4f", key="s_sp1")
+        sp1 = st.number_input("Harga jual Produk 1 (%)", value=99.00, step=0.05, format="%.4f", key="s_sp1")
 
         st.markdown('<div class="ko-cap">Produk 2 — beli</div>', unsafe_allow_html=True)
         code2 = st.selectbox("Kode obligasi Produk 2", PRODUCT_CODES,
@@ -1378,8 +1483,8 @@ def tab_switching():
                            min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_m2",
                            help="Boleh disamakan dengan jatuh tempo Produk 1 agar kedua pilihan "
                                 "dibandingkan dalam rentang waktu yang sama.")
-        nom2 = parse_number(st.text_input("Nilai nominal Produk 2", "200.000.000", key="s_n2"))
-        p2 = st.number_input("Harga beli Produk 2 (%)", value=99.50, step=0.01, format="%.4f", key="s_p2")
+        nom2 = parse_number(money_input("Nilai nominal Produk 2", "200.000.000", "s_n2"))
+        p2 = st.number_input("Harga beli Produk 2 (%)", value=99.50, step=0.05, format="%.4f", key="s_p2")
 
     try:
         r = simulate_switching(code1, to_serial(bs1), nom1, bp1 / 100, to_serial(ss1), sp1 / 100,
@@ -1414,23 +1519,27 @@ def tab_switching():
                 tone_of(r["gain_switch"]))
             row("Pengembalian diterima", money(r["total_return_switch"], cur1))
 
-        st.markdown('<div class="ko-card">', unsafe_allow_html=True)
-        st.markdown('<div class="ko-cap">Rincian peralihan</div>', unsafe_allow_html=True)
-        row("Modal awal (harga bersih Produk 1)", money(r["capital"], cur1))
-        row("Hasil jual Produk 1 (nett)", money(r["proceeds_sell1"], cur1))
-        row("Untung / rugi jual Produk 1", money(r["gain_sell1"], cur1),
-            tone_of(r["gain_sell1"]), indent=True)
-        row("Kupon s.d. jual Produk 1", money(r["coupon_until_sale1"], cur1), indent=True)
-        row("Jumlah dibayar untuk Produk 2", money(r["paid2"], cur2))
-        row("Kupon berjalan Produk 2", money(r["accrued2"], cur2), indent=True)
-        row("Imbal hasil Produk 2 hingga JT", pct(r["ytm2"], 4), indent=True)
-        row("Kupon Produk 2 s.d. JT", money(r["coupon_to_horizon2"], cur2), indent=True)
-        row("Perlu top up sebesar" if r["top_up"] < 0 else "Kelebihan dikreditkan sebesar",
-            money(abs(r["top_up"]), cur1), strong=True)
-        st.markdown("</div>", unsafe_allow_html=True)
-        show_schedule(r["schedule2"], cur2, "Jadwal kupon Produk 2")
+        card("Rincian peralihan", [
+            ("Modal awal (harga bersih Produk 1)", money(r["capital"], cur1)),
+            ("Hasil jual Produk 1 (nett)", money(r["proceeds_sell1"], cur1)),
+            ("Untung / rugi jual Produk 1", money(r["gain_sell1"], cur1), tone_of(r["gain_sell1"]), True),
+            ("Kupon s.d. jual Produk 1", money(r["coupon_until_sale1"], cur1), None, True),
+            ("Jumlah dibayar untuk Produk 2", money(r["paid2"], cur2)),
+            ("Kupon berjalan Produk 2", money(r["accrued2"], cur2), None, True),
+            ("Imbal hasil Produk 2 hingga JT", pct(r["ytm2"], 4), None, True),
+            ("Kupon Produk 2 s.d. JT", money(r["coupon_to_horizon2"], cur2), None, True),
+            ("Perlu top up sebesar" if r["top_up"] < 0 else "Kelebihan dikreditkan sebesar",
+             money(abs(r["top_up"]), cur1), None, False, True),
+        ])
 
-        download("switching", [
+    show_schedule(r["schedule2"], cur2, "Jadwal kupon Produk 2")
+
+    st.divider()
+    st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
+    if r["currency_mismatch"]:
+        st.caption("Gambar tidak dibuat karena kedua produk berbeda mata uang.")
+    else:
+        sections = [
             ("Produk 1", [
                 ("Kode obligasi", code1, None, False),
                 ("Setelmen beli / jual", f"{fmt_date(to_serial(bs1))} → {fmt_date(to_serial(ss1))}", None, False),
@@ -1459,7 +1568,12 @@ def tab_switching():
                 ("Total keuntungan", money(r["gain_switch"], cur1), tone_of(r["gain_switch"]), False),
                 ("Persentase kumulatif", pct(r["pct_switch"]), "strong", False),
             ]),
-        ], "Simulasi Switching", f"{code1} → {code2} · {dt.date.today():%d/%m/%Y}")
+        ]
+        export_section(
+            lambda: render_png("Simulasi Switching",
+                               f"{code1} → {code2} · {dt.date.today():%d/%m/%Y}",
+                               sections, DISCLAIMER),
+            "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
 
 
 # ===========================================================================
