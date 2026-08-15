@@ -876,6 +876,14 @@ DISCLAIMER_FULL = [
 ]
 
 
+DISCLAIMER_SWITCH = [
+    "Kalkulator ini disediakan hanya sebagai alat bantu simulasi Obligasi dan tidak dimaksudkan untuk menyediakan rekomendasi atau saran apa pun.",
+    "Simulasi, harga dan YTM Obligasi yang ditampilkan hanya bersifat indikatif, sehingga terdapat kemungkinan perbedaan dengan perhitungan, harga dan YTM Obligasi pada saat nasabah melakukan transaksi yang sebenarnya.",
+    "Tarif pajak yang digunakan dalam simulasi kalkulator ini menggunakan tarif pajak Obligasi sebesar 10%.",
+    "Perhitungan ini belum dipotong biaya (apabila ada).",
+]
+
+
 def _paren(v):
     """Accounting style — negatives in parentheses, as the workbook shows them."""
     if v is None:
@@ -1070,6 +1078,405 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
         text(ML + 0.34, dy, line, size=6.4)
         dy -= 0.208
 
+    buf = io.BytesIO()
+    FigureCanvasAgg(fig).print_png(buf)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# Shared drawing toolkit for the faithful Jual / Switching exports. Same visual
+# vocabulary as render_beli_export: yellow code banner, black header bars, a
+# left data panel with yellow-highlighted required cells, grey derived rows,
+# black total bars, and a right projection panel with a numbered coupon
+# schedule. Kept in one place so all three exports stay pixel-consistent.
+# ---------------------------------------------------------------------------
+class _Sheet:
+    def __init__(self, ax, col_x, col_w):
+        self.ax = ax
+        self.col_x = col_x
+        self.col_w = col_w
+
+    def text(self, x, y, s, size=9, color=INK, weight="normal", ha="left",
+             va="center", family=SANS):
+        self.ax.text(x, y, s, fontsize=size, color=color, weight=weight,
+                     ha=ha, va=va, family=family)
+
+    def banner(self, x, y, w, code):
+        """Yellow rounded product-code banner."""
+        bh = 0.52
+        self.ax.add_patch(FancyBboxPatch((x, y - bh), w, bh,
+                          boxstyle="round,pad=0,rounding_size=0.02",
+                          facecolor=_EX_MARKER, edgecolor=_EX_MARKER_EDGE, lw=1.2, zorder=2))
+        self.text(x + 0.14, y - bh / 2, code, size=20, weight="bold")
+        return y - bh
+
+    def bar(self, x, y, w, label, h=0.34, size=11):
+        self.ax.add_patch(plt.Rectangle((x, y - h), w, h, facecolor=_EX_BLACK,
+                          edgecolor="none", zorder=2))
+        self.text(x + w / 2, y - h / 2, label, size=size, color="white",
+                  weight="bold", ha="center")
+        return y - h
+
+    def total_bar(self, x, y, w, label, value):
+        h = 0.56
+        self.ax.add_patch(plt.Rectangle((x, y - h), w, h, facecolor=_EX_BLACK, zorder=2))
+        self.text(x + 0.16, y - h / 2, label, size=12.5, color="white", weight="bold")
+        self.text(x + w - 0.16, y - h / 2, value, size=13, color="white",
+                  weight="bold", ha="right", family=MONO)
+        return y - h
+
+    def data_rows(self, x, y, w, rows, rh=0.285):
+        """rows: (label, value, highlight_bool). Yellow fill on highlighted cells."""
+        for lab, val, hl in rows:
+            ry = y - rh
+            if hl:
+                self.ax.add_patch(plt.Rectangle((x + w * 0.52, ry), w * 0.48, rh,
+                                  facecolor=_EX_MARKER, edgecolor="none", zorder=1))
+            self.ax.add_patch(plt.Rectangle((x, ry), w, rh, facecolor="none",
+                              edgecolor=_EX_LINE, lw=0.6, zorder=1.5))
+            self.text(x + 0.10, ry + rh / 2, lab, size=8.5, weight="bold")
+            self.text(x + w - 0.10, ry + rh / 2, val, size=8.5, weight="bold",
+                      ha="right", family=MONO)
+            y = ry
+        return y
+
+    def derived_rows(self, x, y, w, rows, rh=0.285):
+        """Grey panel rows for computed values."""
+        for lab, val in rows:
+            ry = y - rh
+            self.ax.add_patch(plt.Rectangle((x, ry), w, rh, facecolor=_EX_PANEL,
+                              edgecolor=_EX_LINE, lw=0.8, zorder=1))
+            self.text(x + 0.10, ry + rh / 2, lab, size=8, weight="bold")
+            self.text(x + w - 0.10, ry + rh / 2, val, size=8.5, weight="bold",
+                      ha="right", family=MONO)
+            y = ry - 0.06
+        return y
+
+    def rrow(self, x, w, cy, lab, val, *, lab_size=8.8, val_size=8.8,
+             bold_lab=True, bold_val=False, col=INK, dot=False, indent=0.0,
+             mid=None, hair=True):
+        if hair:
+            self.ax.plot([x, x + w], [cy, cy], color=_EX_HAIR, lw=0.6)
+        yy = cy - 0.155
+        prefix = "\u25cf " if dot else ""
+        self.text(x + 0.06 + indent, yy, prefix + lab, size=lab_size,
+                  weight="bold" if bold_lab else "normal")
+        if mid is not None:
+            self.text(x + w * 0.60, yy, mid, size=val_size, ha="right", family=MONO)
+        self.text(x + w - 0.08, yy, val, size=val_size, ha="right", family=MONO,
+                  weight="bold" if bold_val else "normal", color=col)
+        return cy - 0.31
+
+    def schedule(self, x, w, cy, sched, *, date_frac=0.62):
+        """Numbered coupon schedule, collapsed 1..7 + ellipsis + final if long."""
+        def one(cy, n, date, amt):
+            self.ax.text(x + w * date_frac, cy - 0.155, fmt_date_en(date),
+                         fontsize=8.4, family=MONO, ha="left", color=INK, va="center")
+            return self.rrow(x, w, cy, "", _paren(amt), mid=str(n),
+                             bold_lab=False, val_size=8.4, lab_size=8.4)
+        if len(sched) <= 8:
+            for n, date, amt in sched:
+                cy = one(cy, n, date, amt)
+        elif sched:
+            for n, date, amt in sched[:7]:
+                cy = one(cy, n, date, amt)
+            self.ax.plot([x, x + w], [cy, cy], color=_EX_HAIR, lw=0.6)
+            for gx in (0.12, 0.60, 0.90):
+                self.ax.text(x + w * gx, cy - 0.16, "\u22ee", fontsize=9,
+                             ha="center", va="center", color=MUTED)
+            cy -= 0.31
+            last = sched[-1]
+            cy = one(cy, last[0], last[1], last[2])
+        return cy
+
+
+def _new_figure(sim_title, W, H):
+    fig = plt.figure(figsize=(W, H), dpi=170)
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, W)
+    ax.set_ylim(0, H)
+    ax.axis("off")
+    MT = 0.30
+    top = H - MT
+    title_h = 0.50
+    ax.text(0.35, top - 0.02, sim_title, fontsize=17, color=INK, weight="bold",
+            family=SANS, ha="left", va="top")
+    ax.text(W - 0.35, top - 0.10, "Kalkulator Obligasi", fontsize=9.5, color=MUTED,
+            family=SANS, ha="right", va="top")
+    ax.plot([0.35, W - 0.35], [top - title_h + 0.06, top - title_h + 0.06],
+            color=INK, lw=1.6)
+    return fig, ax, top - title_h - 0.14
+
+
+def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
+    lines = lines if lines is not None else DISCLAIMER_FULL
+    box_top = top if top is not None else (0.28 + disc_h)
+    box_bottom = box_top - disc_h
+    ax.add_patch(plt.Rectangle((ML, box_bottom), W - ML - MR, disc_h,
+                 facecolor="white", edgecolor=INK, lw=1.0))
+    dy = box_top - 0.20
+    ax.text(ML + 0.12, dy, "DISCLAIMER :", fontsize=8, color=INK, weight="bold",
+            family=SANS, va="center")
+    dy -= 0.215
+    for line in lines:
+        ax.text(ML + 0.16, dy, "\u25cf", fontsize=6, color=INK, va="center")
+        ax.text(ML + 0.34, dy, line, fontsize=6.4, color=INK, family=SANS, va="center")
+        dy -= 0.208
+
+
+# ---------------------------------------------------------------------------
+# SIMULASI JUAL — two stacked data panels (beli + jual) on the left, projection
+# with sell-vs-hold branches on the right. Matches the uploaded reference.
+# ---------------------------------------------------------------------------
+def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
+                       sell_txn, sell_settle, sell_price, sim_title="SIMULASI JUAL"):
+    cur = r["meta"].currency
+    meta = r["meta"]
+    disc_h = 0.26 + len(DISCLAIMER_FULL) * 0.208 + 0.14
+    W, H = 12.4, 11.35 + disc_h
+    fig, ax, top = _new_figure(sim_title, W, H)
+
+    ML, MR, gutter = 0.35, 0.35, 0.45
+    col_w = (W - ML - MR - gutter) / 2
+    rcol_x = ML + col_w + gutter
+    s = _Sheet(ax, ML, col_w)
+
+    # ===== LEFT =====
+    y = top
+    y = s.banner(ML, y, col_w, code) - 0.22
+    y = s.bar(ML, y, col_w, "Data Produk Obligasi  (NASABAH BELI)")
+    y = s.data_rows(ML, y, col_w, [
+        ("Mata Uang", cur, False),
+        ("Tanggal Transaksi", fmt_date_en(buy_txn), True),
+        ("Tanggal Setelmen", fmt_date_en(buy_settle), True),
+        ("Tanggal Kupon Terakhir", "N/A" if r["is_perdana"] else fmt_date_en(r["buy_last"]), False),
+        ("Tanggal Kupon Pertama", fmt_date_en(r["buy_next"]), False),
+        ("Tanggal Jatuh Tempo (JT)", fmt_date_en(meta.maturity), False),
+        ("Kupon", pct(meta.coupon, 3), False),
+        ("Nilai Nominal", f"{nominal:,.0f}", True),
+        ("Harga Nasabah Beli", f"{buy_price:.4f}%", True),
+    ])
+    y -= 0.16
+    y = s.derived_rows(ML, y, col_w, [
+        ("Hari Kupon Berjalan / Days of Accrued Interest", num(r["buy_accrued_days"])),
+        ("Kupon Berjalan / Accrued Interest", _paren(r["buy_accrued"])),
+    ])
+    y -= 0.14
+    y = s.total_bar(ML, y, col_w, "Jumlah Indikatif yang Dibayar", _paren(r["amount_paid"]))
+    y -= 0.26
+
+    s.text(ML, y, f"Nasabah menjual Obligasi pada tanggal : {fmt_date_en(sell_settle)}", size=8.5)
+    y -= 0.22
+    y = s.bar(ML, y, col_w, "Data Produk Obligasi  (NASABAH JUAL)")
+    y = s.data_rows(ML, y, col_w, [
+        ("Tanggal Transaksi", fmt_date_en(sell_txn), True),
+        ("Tanggal Setelmen", fmt_date_en(sell_settle), True),
+        ("Tanggal Kupon Terakhir", fmt_date_en(r["sell_last"]), False),
+        ("Tanggal Kupon Berikutnya", fmt_date_en(r["sell_next"]), False),
+        ("Harga Nasabah Jual", f"{sell_price:.4f}%", True),
+    ])
+    y -= 0.16
+    y = s.derived_rows(ML, y, col_w, [
+        ("Hari Kupon Berjalan / Days of Accrued Interest", num(r["sell_accrued_days"])),
+        ("Kupon Berjalan / Accrued Interest (Gross)", _paren(r["sell_accrued"])),
+        ("Capital Gain / Loss (Gross)", _paren(r["capital_gain"])),
+    ])
+    y -= 0.14
+    y = s.total_bar(ML, y, col_w, "Jumlah Indikatif yang Diterima (Nett)", _paren(r["net_proceeds"]))
+    y -= 0.24
+
+    s.text(ML, y, "Keterangan :", size=8.5)
+    y -= 0.26
+    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.16, 0.16, facecolor=_EX_MARKER,
+                 edgecolor=_EX_MARKER_EDGE, lw=0.6))
+    s.text(ML + 0.24, y + 0.06, "Kolom yang di-highlight kuning WAJIB diisi dengan data terkini.", size=7.5)
+    y -= 0.28
+    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.16, 0.16, facecolor="#8a9a5b",
+                 edgecolor="#6f7d47", lw=0.6))
+    s.text(ML + 0.24, y + 0.06, "Apabila nasabah membeli di Pasar Perdana, maka akan terisi N/A.", size=7.5)
+
+    # ===== RIGHT =====
+    y = top
+    y = s.bar(rcol_x, y, col_w, "Proyeksi Pendapatan yang Diterima Nasabah (nett)", h=0.40) - 0.06
+    y = s.rrow(rcol_x, col_w, y, "Nominal yang dibayar pada tanggal :",
+               _paren(-r["amount_paid"]), mid=fmt_date_en(buy_settle), bold_val=True, hair=False)
+    y = s.rrow(rcol_x, col_w, y, "Kupon (tidak termasuk pajak capital gain/loss) :", "")
+    y = s.schedule(rcol_x, col_w, y, r["schedule"])
+    y = s.rrow(rcol_x, col_w, y, "Total Kupon yang telah diterima", _paren(r["coupon_to_sale"]),
+               bold_lab=True, bold_val=True)
+
+    y = s.rrow(rcol_x, col_w, y, "Pengembalian yang diterima, jika :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Dijual sebelum JT", _paren(r["proceeds_if_sold"]), dot=True)
+    y = s.rrow(rcol_x, col_w, y, "Ditahan hingga JT", _paren(r["proceeds_if_held"]), dot=True)
+
+    y = s.rrow(rcol_x, col_w, y, "Lama waktu investasi (bulan), jika :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Dijual sebelum JT", num(r["months_if_sold"]), dot=True)
+    y = s.rrow(rcol_x, col_w, y, "Ditahan hingga JT", num(r["months_if_held"]), dot=True)
+
+    y = s.rrow(rcol_x, col_w, y, "Total keuntungan/kerugian, jika :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Dijual sebelum JT", "", dot=True, bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Nominal kumulatif", _paren(r["gain_if_sold"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase kumulatif", pct(r["pct_if_sold"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase disetahunkan (gross)", pct(r["ytm_sell"], 2), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Ditahan hingga JT", "", dot=True, bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Nominal kumulatif", _paren(r["gain_if_held"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase kumulatif", pct(r["pct_if_held"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase disetahunkan (gross)", pct(r["ytm_hold"], 2), indent=0.22)
+
+    _disclaimer_box(ax, W, ML, MR, disc_h)
+    buf = io.BytesIO()
+    FigureCanvasAgg(fig).print_png(buf)
+    plt.close(fig)
+    return buf.getvalue()
+
+
+# ---------------------------------------------------------------------------
+# SIMULASI SWITCHING — three stacked panels on the left (P1 buy, P1 sell,
+# P2 buy) plus two black totals; right side shows P1 coupons, P2 coupons, and
+# the hold-vs-switch comparison. Matches the uploaded reference.
+# ---------------------------------------------------------------------------
+def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
+                            code2, s2, m2, nom2, p2, sim_title="SIMULASI SWITCHING"):
+    p1 = r["p1"]
+    cur1 = p1["meta"].currency
+    cur2 = r["meta2"].currency
+    meta1, meta2 = p1["meta"], r["meta2"]
+    disc_h = 0.26 + len(DISCLAIMER_SWITCH) * 0.208 + 0.14
+    # Left column is the tallest element; its content depth below `top` is a
+    # fixed ~15.32in. Size the canvas so that depth plus the disclaimer plus the
+    # bottom margin fit exactly, then pin the disclaimer under the keterangan.
+    W = 12.6
+    _left_depth = 15.32
+    H = 0.94 + _left_depth + disc_h + 0.28
+    fig, ax, top = _new_figure(sim_title, W, H)
+
+    ML, MR, gutter = 0.35, 0.35, 0.45
+    col_w = (W - ML - MR - gutter) / 2
+    rcol_x = ML + col_w + gutter
+    s = _Sheet(ax, ML, col_w)
+
+    # ===== LEFT =====
+    y = top
+    y = s.banner(ML, y, col_w, code1) - 0.20
+    y = s.bar(ML, y, col_w, "Data Produk Obligasi (NASABAH BELI PRODUK 1)", size=10)
+    y = s.data_rows(ML, y, col_w, [
+        ("Mata Uang", cur1, False),
+        ("Tanggal Transaksi", fmt_date_en(bs1), True),
+        ("Tanggal Setelmen", fmt_date_en(bs1), True),
+        ("Tanggal Kupon Terakhir", "N/A" if p1["is_perdana"] else fmt_date_en(p1["buy_last"]), False),
+        ("Tanggal Kupon Pertama", fmt_date_en(p1["buy_next"]), False),
+        ("Tanggal Jatuh Tempo (JT)", fmt_date_en(meta1.maturity), False),
+        ("Kupon", pct(meta1.coupon, 3), False),
+        ("Nilai Nominal", f"{nom1:,.0f}", True),
+        ("Harga Nasabah Beli", f"{bp1:.4f}%", True),
+    ])
+    y -= 0.14
+    y = s.derived_rows(ML, y, col_w, [
+        ("Hari Kupon Berjalan / Days of Accrued Interest", num(p1["buy_accrued_days"])),
+        ("Kupon Berjalan / Accrued Interest", _paren(p1["buy_accrued"])),
+    ])
+    y -= 0.16
+    y = s.bar(ML, y, col_w, "Data Produk Obligasi (NASABAH JUAL PRODUK 1)", size=10)
+    y = s.data_rows(ML, y, col_w, [
+        ("Tanggal Transaksi", fmt_date_en(ss1), True),
+        ("Tanggal Setelmen", fmt_date_en(ss1), True),
+        ("Harga Nasabah Jual", f"{sp1:.4f}%", True),
+    ])
+    y -= 0.14
+    y = s.derived_rows(ML, y, col_w, [
+        ("Hari Kupon Berjalan / Days of Accrued Interest", num(p1["sell_accrued_days"])),
+        ("Kupon Berjalan / Accrued Interest", _paren(p1["sell_accrued"])),
+        ("Capital Gain / Loss", _paren(p1["capital_gain"])),
+    ])
+    y -= 0.14
+    y = s.total_bar(ML, y, col_w, "Jumlah Indikatif yang Diterima", _paren(p1["net_proceeds"]))
+    y -= 0.26
+
+    s.text(ML, y, "Nasabah melakukan switching dengan produk :", size=8.5)
+    y -= 0.30
+    y = s.banner(ML, y, col_w, code2) - 0.18
+    y = s.bar(ML, y, col_w, "Data Produk Obligasi  (NASABAH BELI PRODUK 2)", size=10)
+    y = s.data_rows(ML, y, col_w, [
+        ("Mata Uang", cur2, False),
+        ("Tanggal Setelmen", fmt_date_en(s2), True),
+        ("Tanggal Kupon Terakhir", "N/A" if r["is_perdana2"] else fmt_date_en(r["last_coupon2"]), False),
+        ("Tanggal Kupon Pertama", fmt_date_en(r["next_coupon2"]), False),
+        ("Tanggal Jatuh Tempo (JT)", fmt_date_en(m2), True),
+        ("Kupon", pct(meta2.coupon, 3), False),
+        ("Nilai Nominal", f"{nom2:,.0f}", True),
+        ("Harga Nasabah Beli", f"{p2:.4f}%", True),
+    ])
+    y -= 0.14
+    y = s.derived_rows(ML, y, col_w, [
+        ("Hari Kupon Berjalan / Days of Accrued Interest", num(r["accrued_days2"])),
+        ("Kupon Berjalan / Accrued Interest", _paren(r["accrued2"])),
+    ])
+    y -= 0.16
+    y = s.total_bar(ML, y, col_w, "Jumlah Indikatif yang Dibayar", _paren(r["amount_paid2"]))
+    y -= 0.06
+    topup_label = "Perlu Top up sebesar" if r["top_up"] < 0 else "Kelebihan dikreditkan"
+    y = s.total_bar(ML, y, col_w, topup_label, _paren(abs(r["top_up"])))
+    y -= 0.26
+
+    # keterangan notes (match reference)
+    s.text(ML, y, "Keterangan :", size=8.5)
+    y -= 0.22
+    s.text(ML + 0.02, y + 0.06, "1)", size=7.5, weight="bold")
+    s.text(ML + 0.26, y + 0.06, "Produk 1 & 2 hanya dapat diisi dengan Produk Mata Uang yang sama.", size=7)
+    y -= 0.205
+    s.text(ML + 0.02, y + 0.06, "2)", size=7.5, weight="bold")
+    s.text(ML + 0.26, y + 0.06, "Produk 2 dapat diisi dengan Produk Obligasi Pasar Perdana maupun Sekunder.", size=7)
+    y -= 0.24
+    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor=_EX_MARKER,
+                 edgecolor=_EX_MARKER_EDGE, lw=0.6))
+    s.text(ML + 0.24, y + 0.055, "Kolom yang di-highlight kuning WAJIB diisi dengan data terkini.", size=7)
+    y -= 0.22
+    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor="#8a9a5b",
+                 edgecolor="#6f7d47", lw=0.6))
+    s.text(ML + 0.24, y + 0.055, "Apabila nasabah membeli di Pasar Perdana, maka harus diisi N/A.", size=7)
+    y -= 0.22
+    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor="#a9c7e8",
+                 edgecolor="#7fa8d0", lw=0.6))
+    s.text(ML + 0.24, y + 0.055, "Tanggal JT Produk 2 dapat diisi sesuai JT Produk 2 atau sama dengan JT Produk 1.", size=7)
+    left_bottom = y - 0.22
+
+    # ===== RIGHT =====
+    y = top
+    y = s.bar(rcol_x, y, col_w, "Proyeksi Pendapatan yang Diterima Nasabah (nett)", h=0.40) - 0.06
+    y = s.rrow(rcol_x, col_w, y, "Nominal yang dibayar pada tanggal :",
+               _paren(-p1["amount_paid"]), mid=fmt_date_en(bs1), bold_val=True, hair=False)
+    y = s.rrow(rcol_x, col_w, y, "Kupon Produk 1 (tidak termasuk pajak capital gain/loss) :", "",
+               lab_size=8.2)
+    y = s.schedule(rcol_x, col_w, y, p1["schedule"])
+    y = s.rrow(rcol_x, col_w, y, "Kupon yang diterima hingga jual Produk 1",
+               _paren(p1["coupon_to_sale"]), bold_lab=True, bold_val=True, lab_size=8.2)
+
+    y = s.rrow(rcol_x, col_w, y, "Kupon Produk 2 (tidak termasuk pajak capital gain/loss) :", "",
+               lab_size=8.2)
+    y = s.schedule(rcol_x, col_w, y, r["schedule2"])
+    y = s.rrow(rcol_x, col_w, y, "Kupon yang diterima hingga JT Produk 2",
+               _paren(r["coupon_to_horizon2"]), bold_lab=True, bold_val=True, lab_size=8.2)
+
+    y = s.rrow(rcol_x, col_w, y, "Pengembalian yang diterima, jika :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 ditahan hingga JT", _paren(p1["proceeds_if_held"]), dot=True)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 dialihkan dengan Produk 2",
+               _paren(r["total_return_switch"]), dot=True)
+
+    y = s.rrow(rcol_x, col_w, y, "Lama waktu investasi (bulan), jika :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 ditahan hingga JT", num(p1["months_if_held"]), dot=True)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 dialihkan dengan Produk 2", num(r["months_switched"]), dot=True)
+
+    y = s.rrow(rcol_x, col_w, y, "Total keuntungan :", "", bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 ditahan hingga JT", "", dot=True, bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Nominal kumulatif", _paren(p1["gain_if_held"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase kumulatif", pct(p1["pct_if_held"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Produk 1 dialihkan dengan Produk 2", "", dot=True, bold_lab=True)
+    y = s.rrow(rcol_x, col_w, y, "Nominal kumulatif", _paren(r["gain_switch"]), indent=0.22)
+    y = s.rrow(rcol_x, col_w, y, "Persentase kumulatif", pct(r["pct_switch"]), indent=0.22)
+
+    _disclaimer_box(ax, W, ML, MR, disc_h, lines=DISCLAIMER_SWITCH, top=left_bottom)
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
     plt.close(fig)
@@ -1423,35 +1830,13 @@ def tab_jual():
 
     st.divider()
     st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
-    sections = [
-        ("Data transaksi", [
-            ("Kode obligasi", code, None, False),
-            ("Setelmen beli", fmt_date(to_serial(buy_settle)), None, False),
-            ("Harga beli", f"{buy_price:.4f}%", None, False),
-            ("Setelmen jual", fmt_date(to_serial(sell_settle)), None, False),
-            ("Harga jual", f"{sell_price:.4f}%", None, False),
-            ("Nilai nominal", money(nominal, cur), None, False),
-        ]),
-        ("Jika dijual sebelum jatuh tempo", [
-            ("Jumlah dibayar saat beli", money(r["amount_paid"], cur), None, False),
-            ("Jumlah diterima (nett)", money(r["net_proceeds"], cur), None, False),
-            ("Total kupon diterima", money(r["coupon_to_sale"], cur), None, False),
-            ("Capital gain / loss", money(r["capital_gain"], cur), tone_of(r["capital_gain"]), True),
-            ("Lama investasi", f"{num(r['months_if_sold'])} bulan", None, True),
-            ("Total keuntungan", money(r["gain_if_sold"], cur), tone_of(r["gain_if_sold"]), False),
-            ("Persentase kumulatif", pct(r["pct_if_sold"]), "strong", False),
-        ]),
-        ("Jika ditahan hingga jatuh tempo", [
-            ("Pengembalian diterima", money(r["proceeds_if_held"], cur), None, False),
-            ("Imbal hasil (gross)", pct(r["ytm_hold"], 4), None, False),
-            ("Lama investasi", f"{num(r['months_if_held'])} bulan", None, True),
-            ("Total keuntungan", money(r["gain_if_held"], cur), tone_of(r["gain_if_held"]), False),
-            ("Persentase kumulatif", pct(r["pct_if_held"]), "strong", False),
-        ]),
-    ]
     export_section(
-        lambda: render_png("Simulasi Jual", f"{code} · {dt.date.today():%d/%m/%Y}",
-                           sections, DISCLAIMER),
+        lambda: render_jual_export(
+            r, code=code,
+            buy_txn=to_serial(buy_settle) - 2, buy_settle=to_serial(buy_settle),
+            nominal=nominal, buy_price=buy_price,
+            sell_txn=to_serial(sell_settle) - 2, sell_settle=to_serial(sell_settle),
+            sell_price=sell_price, sim_title="SIMULASI JUAL"),
         "SIMULASI JUAL", code, "j_export")
 
 
@@ -1539,40 +1924,12 @@ def tab_switching():
     if r["currency_mismatch"]:
         st.caption("Gambar tidak dibuat karena kedua produk berbeda mata uang.")
     else:
-        sections = [
-            ("Produk 1", [
-                ("Kode obligasi", code1, None, False),
-                ("Setelmen beli / jual", f"{fmt_date(to_serial(bs1))} → {fmt_date(to_serial(ss1))}", None, False),
-                ("Harga beli / jual", f"{bp1:.4f}% → {sp1:.4f}%", None, False),
-                ("Nilai nominal", money(nom1, cur1), None, False),
-                ("Hasil jual (nett)", money(r["proceeds_sell1"], cur1), None, False),
-            ]),
-            ("Produk 2", [
-                ("Kode obligasi", code2, None, False),
-                ("Setelmen", fmt_date(to_serial(s2)), None, False),
-                ("Jatuh tempo dipakai", fmt_date(to_serial(m2)), None, False),
-                ("Harga beli", f"{p2:.4f}%", None, False),
-                ("Jumlah dibayar", money(r["paid2"], cur2), None, False),
-                ("Imbal hasil hingga JT", pct(r["ytm2"], 4), None, False),
-            ]),
-            ("Produk 1 ditahan hingga JT", [
-                ("Pengembalian diterima", money(r["p1"]["proceeds_if_held"], cur1), None, False),
-                ("Lama investasi", f"{num(r['p1']['months_if_held'])} bulan", None, True),
-                ("Total keuntungan", money(r["p1"]["gain_if_held"], cur1),
-                 tone_of(r["p1"]["gain_if_held"]), False),
-                ("Persentase kumulatif", pct(r["p1"]["pct_if_held"]), "strong", False),
-            ]),
-            ("Dialihkan ke Produk 2", [
-                ("Pengembalian diterima", money(r["total_return_switch"], cur1), None, False),
-                ("Lama investasi", f"{num(r['months_switched'])} bulan", None, True),
-                ("Total keuntungan", money(r["gain_switch"], cur1), tone_of(r["gain_switch"]), False),
-                ("Persentase kumulatif", pct(r["pct_switch"]), "strong", False),
-            ]),
-        ]
         export_section(
-            lambda: render_png("Simulasi Switching",
-                               f"{code1} → {code2} · {dt.date.today():%d/%m/%Y}",
-                               sections, DISCLAIMER),
+            lambda: render_switching_export(
+                r, code1=code1, bs1=to_serial(bs1), ss1=to_serial(ss1),
+                nom1=nom1, bp1=bp1, sp1=sp1,
+                code2=code2, s2=to_serial(s2), m2=to_serial(m2),
+                nom2=nom2, p2=p2, sim_title="SIMULASI SWITCHING"),
             "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
 
 
