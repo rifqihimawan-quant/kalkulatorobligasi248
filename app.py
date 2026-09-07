@@ -36,9 +36,6 @@ MONTHS_ID = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
              "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
 
 
-# ===========================================================================
-# Excel-compatible primitives
-# ===========================================================================
 def to_serial(d) -> int:
     if isinstance(d, (int, float)):
         return int(d)
@@ -537,6 +534,7 @@ def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sel
     last_cpn_tax = ((to_mat["short_tax_r"] if (to_mat["periods"] == 1
                      and to_mat["months_invested"] < meta.freq_months) else to_mat["coupon_tax_r"])
                     if meta.currency == "IDR" else to_mat["coupon_tax"])
+    total_tax_mat = trunc(0 if cg_mat_tax + last_cpn_tax < 0 else cg_mat_tax + last_cpn_tax)
     final_cpn_net = to_mat["gross_coupon"] - total_tax_mat
     coupon_to_mat = 0.0 if to_mat["periods"] == 0 else (
         (to_mat["periods"] - 2) * to_mat["per_period_net"] + to_mat["first_net"]
@@ -843,15 +841,12 @@ def render_kredit_export(opt_title, data_dict):
     def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center"):
         ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=SANS)
 
-    # Title Banner
     ax.text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", fontsize=15, color=INK, weight="bold", family=SANS, va="top")
     ax.text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", fontsize=9, color=MUTED, family=MONO, ha="right", va="top")
     top -= 0.4
     ax.plot([ML, W - MR], [top, top], color=INK, lw=1.5)
     top -= 0.4
 
-    cur = data_dict["currency"]
-    
     def section_header(title, y_pos):
         ax.add_patch(plt.Rectangle((ML, y_pos - 0.3), W - ML - MR, 0.3, facecolor=_EX_BLACK, edgecolor="none"))
         ax.text(ML + 0.15, y_pos - 0.15, title, fontsize=10, color="white", weight="bold", va="center", family=SANS)
@@ -867,7 +862,6 @@ def render_kredit_export(opt_title, data_dict):
             y_pos = ry
         return y_pos - 0.15
 
-    # 1. Parameter Utama
     top = section_header("1. PARAMETER KREDIT & INVESTASI", top)
     top = add_rows([
         ("Produk Obligasi", data_dict["code"], False),
@@ -878,7 +872,6 @@ def render_kredit_export(opt_title, data_dict):
         ("Tenor Pinjaman", f"{data_dict['tenor']} Tahun", False),
     ], top)
 
-    # 2. Simulasi Cashflow
     top = section_header("2. ESTIMASI PENDAPATAN & BEBAN", top)
     top = add_rows([
         ("Bunga Investasi / Tahun (Nett)", data_dict["inv_nett_fmt"], True),
@@ -887,7 +880,6 @@ def render_kredit_export(opt_title, data_dict):
         ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False),
     ], top)
 
-    # Disclaimer Box inside export
     disc_top = 1.4
     ax.add_patch(plt.Rectangle((ML, 0.4), W - ML - MR, disc_top, facecolor="white", edgecolor=INK, lw=0.8))
     dy = 0.4 + disc_top - 0.2
@@ -991,7 +983,7 @@ class _Sheet:
                 cy = one(cy, n, date, amt)
             self.ax.plot([x, x + w], [cy, cy], color=_EX_HAIR, lw=0.6)
             for gx in (0.12, 0.60, 0.90):
-                self.ax.text(x + w * gx, cy - 0.16, "\u22ee", fontsize=9,
+                self.ax.text(x + w * gx, cy - 0.16, fontsize=9,
                              ha="center", va="center", color=MUTED)
             cy -= 0.31
             last = sched[-1]
@@ -1635,7 +1627,6 @@ def tab_kredit():
             ("Cicilan / Bulan (Metode Anuitas - IL)", money(pmt, cur, decimals=0), "loss", False, True)
         ])
         
-        # Build dictionary for image rendering
         export_data = {
             "code": code,
             "currency": cur,
