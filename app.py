@@ -164,7 +164,7 @@ def _coupon_dates(settle, maturity, freq):
     while d > settle and guard < 2000:
         nxt, d = d, edate(d, -step)
         guard += 1
-    return d, (nxt if nxt is not None else edate(d, step))
+    return d
 
 
 def _coup_num(settle, maturity, freq) -> int:
@@ -765,7 +765,7 @@ def money_input(label, default, key, cur_hint="Rp"):
     raw = st.text_input(label, default, key=key)
     val = parse_number(raw)
     if val is not None:
-        st.caption(f"= {cur_hint} {val:,.0f}".replace(",", "."))
+        st.caption(f"= {cur_hint} {val:,.0f}".replace(",", ".").strip())
     elif raw.strip():
         st.caption("⚠️ Angka tidak dikenali")
     return raw
@@ -1933,6 +1933,103 @@ def tab_switching():
             "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
 
 
+def tab_kredit():
+    st.markdown('<div class="ko-cap" style="margin-bottom:12px;">Simulasi Kredit Agunan Obligasi</div>', unsafe_allow_html=True)
+    left, right = st.columns(2, gap="large")
+
+    def render_kredit_col(idx, def_nom, def_prod, def_tenor):
+        st.markdown(f'<div class="ko-cap" style="margin-top:0px;">Opsi {idx}</div>', unsafe_allow_html=True)
+        
+        # User Inputs (Yellow mapped counterparts)
+        nom_raw = money_input("Nominal Investasi", def_nom, f"k_nom_{idx}", cur_hint="")
+        nom = parse_number(nom_raw) or 0.0
+        
+        code = st.selectbox("Produk", PRODUCT_CODES, index=PRODUCT_CODES.index(def_prod), key=f"k_prod_{idx}")
+        meta = product_meta(code)
+        show_meta(meta)
+        
+        cur = meta.currency
+        ltv_def = 90.0 if cur == "IDR" else 80.0
+        
+        colA, colB = st.columns(2)
+        with colA:
+            ltv = st.number_input("LTV (%)", value=ltv_def, step=1.0, format="%.1f", key=f"k_ltv_{idx}") / 100.0
+            bunga_kredit = st.number_input("Suku Bunga Kredit (% p.a)", value=7.18, step=0.1, format="%.2f", key=f"k_bk_{idx}") / 100.0
+        with colB:
+            prov_pct = st.number_input("Provisi (%)", value=0.0, step=0.1, format="%.2f", key=f"k_prov_{idx}") / 100.0
+            admin_raw = money_input("Admin", "0", f"k_adm_{idx}", cur_hint=cur)
+            admin = parse_number(admin_raw) or 0.0
+        
+        tenor = st.number_input("Tenor Pinjaman (Tahun)", value=def_tenor, step=1, key=f"k_tenor_{idx}")
+        
+        # Main Calculations
+        plafon = nom * ltv
+        prov_nom = plafon * prov_pct
+        tot_biaya = prov_nom + admin
+        
+        inv_gross = nom * meta.coupon
+        inv_nett = inv_gross * (1 - TAX)
+        inv_bulan = inv_nett / 12
+        # Math mapped from Excel (360 days for daily equivalent)
+        inv_hari = inv_nett / 360 
+        
+        pinj_tahun = plafon * bunga_kredit
+        pinj_bulan = pinj_tahun / 12
+        pinj_hari = pinj_tahun / 360
+        
+        # Exact annuity installment calculation (PMT)
+        if tenor > 0:
+            n = int(tenor * 12)
+            if bunga_kredit > 0:
+                r = bunga_kredit / 12
+                pmt = (plafon * r * math.pow(1+r, n)) / (math.pow(1+r, n) - 1)
+                tot_bunga = (pmt * n) - plafon
+            else:
+                pmt = plafon / n
+                tot_bunga = 0
+        else:
+            pmt = 0
+            tot_bunga = 0
+            
+        # Passing decimals=0 forces the display format to match the Excel screenshot strictly.
+        st.markdown('<div class="ko-cap" style="margin-top:16px;">Ringkasan Parameter</div>', unsafe_allow_html=True)
+        card(None, [
+            ("Kupon Produk", pct(meta.coupon, 3)),
+            ("Periode Bunga", "Setiap Bulan" if meta.freq_months == 1 else "Setiap 6 Bulan"),
+            ("Plafon Kredit", money(plafon, cur, decimals=0), None, False, True),
+            ("Provisi", money(prov_nom, cur, decimals=0)),
+            ("Admin", money(admin, cur, decimals=0)),
+            ("Total Biaya", money(tot_biaya, cur, decimals=0), "loss", False, True)
+        ])
+        
+        st.markdown('<div class="ko-cap">Simulasi Bunga Investasi</div>', unsafe_allow_html=True)
+        card(None, [
+            ("Bunga Investasi / Tahun (Gross)", money(inv_gross, cur, decimals=0)),
+            ("Bunga Investasi / Tahun (Nett)", money(inv_nett, cur, decimals=0), "gain", False, True),
+            ("Bunga Investasi / Bulan (eqv)", money(inv_bulan, cur, decimals=0)),
+            ("Bunga Investasi / Hari (eqv)", money(inv_hari, cur, decimals=0), "gain", False, True)
+        ])
+        
+        st.markdown('<div class="ko-cap">Simulasi Pinjaman (KL atau RK) — Asumsi Maksimal</div>', unsafe_allow_html=True)
+        card(None, [
+            ("Bunga Pinjaman / Tahun", money(pinj_tahun, cur, decimals=0)),
+            ("Bunga Pinjaman / Bulan", money(pinj_bulan, cur, decimals=0)),
+            ("Bunga Pinjaman / Hari", money(pinj_hari, cur, decimals=0), "loss", False, True)
+        ])
+        
+        st.markdown('<div class="ko-cap">Simulasi Pinjaman (IL)</div>', unsafe_allow_html=True)
+        card(None, [
+            ("Total Bunga Pinjaman", money(tot_bunga, cur, decimals=0)),
+            ("Cicilan / Bulan", money(pmt, cur, decimals=0), "loss", False, True)
+        ])
+        st.markdown('<div style="color:#b4342a; font-size:11px; font-weight:600; font-style:italic; margin-top:-6px;">*Perhitungan bunga IL menggunakan perhitungan anuitas</div>', unsafe_allow_html=True)
+        
+    with left:
+        render_kredit_col(1, "300,000", "INDOIS30NEWNEW", 3)
+    with right:
+        render_kredit_col(2, "5,000,000,000", "FR0082", 3)
+
+
 # ===========================================================================
 # Entry point
 # ===========================================================================
@@ -1948,13 +2045,16 @@ def main():
         unsafe_allow_html=True,
     )
 
-    beli, jual, switching = st.tabs(["Simulasi Beli", "Simulasi Jual", "Simulasi Switching"])
+    beli, jual, switching, kredit = st.tabs(["Simulasi Beli", "Simulasi Jual", "Simulasi Switching", "Simulasi Kredit"])
+    
     with beli:
         tab_beli()
     with jual:
         tab_jual()
     with switching:
         tab_switching()
+    with kredit:
+        tab_kredit()
 
     with st.expander("Disclaimer"):
         for text in DISCLAIMER:
