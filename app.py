@@ -164,7 +164,7 @@ def _coupon_dates(settle, maturity, freq):
     while d > settle and guard < 2000:
         nxt, d = d, edate(d, -step)
         guard += 1
-    return d
+    return d, (nxt if nxt is not None else edate(d, step))
 
 
 def _coup_num(settle, maturity, freq) -> int:
