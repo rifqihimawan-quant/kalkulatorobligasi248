@@ -65,7 +65,6 @@ _MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct",
 
 
 def fmt_date_en(serial) -> str:
-    """Short English date (12-Aug-26), matching the original workbook export."""
     if serial is None:
         return "N/A"
     d = to_date(serial)
@@ -78,7 +77,6 @@ def _days_in_month(y: int, m: int) -> int:
 
 
 def edate(serial, months: int) -> int:
-    """Excel EDATE: same day of month, clamped to the month end."""
     d = to_date(serial)
     total = d.year * 12 + (d.month - 1) + months
     y, m = total // 12, total % 12 + 1
@@ -86,13 +84,11 @@ def edate(serial, months: int) -> int:
 
 
 def xdate(y: int, m: int, day: int) -> int:
-    """Excel DATE(y, m, d) — month and day overflow roll forward."""
     y2, m2 = y + (m - 1) // 12, (m - 1) % 12 + 1
     return to_serial(dt.date(y2, m2, 1)) + (day - 1)
 
 
 def datedif_m(a, b) -> int:
-    """Excel DATEDIF unit "M" — complete calendar months."""
     if b < a:
         return -datedif_m(b, a)
     da, db = to_date(a), to_date(b)
@@ -102,25 +98,7 @@ def datedif_m(a, b) -> int:
     return n
 
 
-def datedif_ym(a, b) -> int:
-    return abs(datedif_m(a, b)) % 12
-
-
-def datedif_yd(a, b) -> int:
-    if b < a:
-        a, b = b, a
-    da, db = to_date(a), to_date(b)
-    try:
-        anchor = dt.date(db.year, da.month, da.day)
-    except ValueError:
-        anchor = dt.date(db.year, da.month, _days_in_month(db.year, da.month))
-    if anchor > db:
-        anchor = dt.date(db.year - 1, da.month, min(da.day, _days_in_month(db.year - 1, da.month)))
-    return (db - anchor).days
-
-
 def days360_eu(a, b) -> int:
-    """Excel DAYS360(start, end, TRUE) — European method."""
     da, db = to_date(a), to_date(b)
     d1 = 30 if da.day == 31 else da.day
     d2 = 30 if db.day == 31 else db.day
@@ -128,7 +106,6 @@ def days360_eu(a, b) -> int:
 
 
 def days360_us(a, b) -> int:
-    """Excel DAYS360(start, end) — US (NASD) method, used inside PRICE."""
     da, db = to_date(a), to_date(b)
     d1, d2 = da.day, db.day
     if d1 == 31:
@@ -144,14 +121,12 @@ def trunc(x, digits: int = 0):
 
 
 def xround(x, digits: int = 0):
-    """Excel ROUND — half away from zero, unlike Python's banker's rounding."""
     f = 10 ** digits
     v = x * f
     return (-math.floor(-v + 0.5) if v < 0 else math.floor(v + 0.5)) / f
 
 
 def bbg_round(x):
-    """The workbook's IF(x - TRUNC(x) > 0.5, ROUNDUP, ROUNDDOWN) idiom."""
     if x == 0:
         return 0.0
     return float(math.ceil(x)) if (x - math.trunc(x)) > 0.5 else float(math.floor(x))
@@ -177,7 +152,6 @@ def _coup_num(settle, maturity, freq) -> int:
 
 
 def price(settle, maturity, rate, yld, redemption, freq, basis):
-    """Excel PRICE(). basis 0 = 30/360 US, basis 1 = actual/actual."""
     pcd, ncd = _coupon_dates(settle, maturity, freq)
     n = _coup_num(settle, maturity, freq)
     if basis == 0:
@@ -197,7 +171,6 @@ def price(settle, maturity, rate, yld, redemption, freq, basis):
 
 
 def xyield(settle, maturity, rate, pr, redemption, freq, basis):
-    """Excel YIELD(), solved by bisection."""
     if maturity <= settle or pr <= 0:
         return None
     lo, hi = -0.99, 10.0
@@ -210,9 +183,6 @@ def xyield(settle, maturity, rate, pr, redemption, freq, basis):
     return (lo + hi) / 2
 
 
-# ===========================================================================
-# Product metadata
-# ===========================================================================
 @dataclass
 class Meta:
     code: str
@@ -235,16 +205,16 @@ def _build_index():
     idx = {}
     for code, issued, maturity, coupon, cday, m1, m2, fad, fcd in PRODUCTS_RAW:
         prefix = code[:2]
-        semi = prefix in ("FR", "IN", "PB", "US")          # D208
-        currency = "USD" if prefix in ("IN", "US") else "IDR"   # D8
+        semi = prefix in ("FR", "IN", "PB", "US")
+        currency = "USD" if prefix in ("IN", "US") else "IDR"
         idx[code] = Meta(
             code=code, issued=issued, maturity=maturity, coupon=coupon,
             cday=cday, m1=m1, m2=m2, first_accrual=fad, first_coupon=fcd,
             prefix=prefix,
             frequency="Semi Annually" if semi else "Monthly",
-            freq_months=6 if semi else 1,                   # D270
+            freq_months=6 if semi else 1,
             currency=currency,
-            unit_value=1_000_000 if currency == "IDR" else 1000,  # D217
+            unit_value=1_000_000 if currency == "IDR" else 1000,
         )
     return idx
 
@@ -258,17 +228,10 @@ def product_meta(code):
 
 
 class SimError(Exception):
-    """Raised when the inputs cannot produce a meaningful simulation."""
+    pass
 
 
-# ===========================================================================
-# Shared blocks
-# ===========================================================================
 def _bracket_coupons(meta: Meta, settlement: int):
-    """
-    Coupon dates bracketing a settlement date, walked from the anniversary
-    month/day in the product table. Mirrors D306:D310, D346:D350, D471:D475.
-    """
     fm = meta.freq_months
     d = to_date(settlement)
     anchor = xdate(d.year, d.month, meta.cday) if fm == 1 else xdate(d.year, meta.m1, meta.cday)
@@ -283,11 +246,6 @@ def _bracket_coupons(meta: Meta, settlement: int):
 
 
 def _first_coupon_window(meta: Meta, settlement: int) -> bool:
-    """
-    D211/D209/D365. Note the sheet tests only the prefix and the date window —
-    it deliberately ignores the "New Issuance Obligasi Sekunder?" column,
-    which is display-only.
-    """
     return (meta.prefix == "IN"
             and meta.first_accrual is not None and meta.first_coupon is not None
             and meta.first_accrual < settlement < meta.first_coupon)
@@ -304,18 +262,17 @@ def _resolve_coupons(meta: Meta, settlement: int, is_perdana: bool):
 
 def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
                    nominal, px, is_perdana, round_accrual=True):
-    """Accrued interest. Mirrors D219:D223 (Beli), D217:D221 & D243:D247 (Jual)."""
     units = nominal / meta.unit_value
     per_period = 12 if meta.freq_months == 1 else 2
 
-    if is_perdana:                                                    # D219 / D243
+    if is_perdana:
         days = 0
     elif meta.currency == "IDR" or meta.prefix == "US":
         days = settlement - last_coupon
     else:
         days = days360_eu(last_coupon, settlement)
 
-    if is_perdana:                                                    # D220 / D244
+    if is_perdana:
         per_unit = 0.0
     elif meta.currency == "IDR" or meta.prefix == "US":
         per_unit = (meta.unit_value * meta.coupon / per_period
@@ -324,9 +281,9 @@ def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
         raw = days360_eu(last_coupon, settlement) / 360 * nominal * meta.coupon
         per_unit = xround(raw, 2) if round_accrual else raw
 
-    rounded = bbg_round(per_unit) if meta.currency == "IDR" else per_unit   # D221 / D245
+    rounded = bbg_round(per_unit) if meta.currency == "IDR" else per_unit
 
-    if meta.currency == "IDR":                                        # D222 / D246
+    if meta.currency == "IDR":
         accrued = units * rounded
     elif meta.prefix == "US":
         accrued = units * (xround(per_unit, 2) if round_accrual else per_unit)
@@ -334,7 +291,7 @@ def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
         accrued = per_unit
 
     gross = nominal * px + accrued
-    total = trunc(gross) if meta.currency == "IDR" else gross         # D223 / D247
+    total = trunc(gross) if meta.currency == "IDR" else gross
     return dict(units=units, days=days, per_unit=per_unit, rounded=rounded,
                 accrued=accrued, total=total)
 
@@ -342,15 +299,14 @@ def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
 def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
                    settlement, nominal, units, accrued, horizon,
                    is_perdana, months_horizon=None, net_check=None):
-    """Coupon economics. Mirrors D242:D273 (Beli) and D269:D299 (Jual)."""
     fm, cur, pref, cpn_rate = meta.freq_months, meta.currency, meta.prefix, meta.coupon
     per_period = 12 if fm == 1 else 2
 
-    span = datedif_m(edate(next_coupon, -fm), horizon)                # D242 / D269
+    span = datedif_m(edate(next_coupon, -fm), horizon)
     periods = span if (cur == "IDR" and fm == 1) else int(xround(span / 6))
     months_invested = datedif_m(settlement, horizon if months_horizon is None else months_horizon)
 
-    base = meta.unit_value * cpn_rate / per_period                    # D244 / D271
+    base = meta.unit_value * cpn_rate / per_period
     if cur == "IDR":
         per_unit = bbg_round(base)
     elif pref == "US":
@@ -358,11 +314,11 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
     else:
         per_unit = nominal * cpn_rate / per_period
 
-    gross_coupon = units * per_unit if cur == "IDR" or pref == "US" else per_unit  # D245
-    coupon_tax = gross_coupon * TAX if cur == "IDR" or pref == "US" else 0.0       # D246
-    coupon_tax_r = xround(coupon_tax)                                              # D247
+    gross_coupon = units * per_unit if cur == "IDR" or pref == "US" else per_unit
+    coupon_tax = gross_coupon * TAX if cur == "IDR" or pref == "US" else 0.0
+    coupon_tax_r = xround(coupon_tax)
 
-    short_per_unit = 0.0                                              # D248 / D275
+    short_per_unit = 0.0
     if not is_perdana:
         if cur == "IDR":
             short_per_unit = bbg_round(meta.unit_value * cpn_rate / (12 / fm)
@@ -370,15 +326,15 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
         elif pref == "US":
             short_per_unit = per_unit * (next_coupon - settlement) / (next_coupon - last_coupon)
     short_gross = units * (xround(short_per_unit, 2) if pref == "US" else short_per_unit)
-    short_tax_r = xround(short_gross * TAX)                           # D251 / D278
+    short_tax_r = xround(short_gross * TAX)
 
-    one_back = edate(next_coupon, -fm)                                # D260 / D287
-    two_back = edate(one_back, -fm)                                   # D261 / D288
+    one_back = edate(next_coupon, -fm)
+    two_back = edate(one_back, -fm)
 
     first_gap = (next_coupon - settlement) if is_perdana else (next_coupon - last_coupon)
-    ctype = "LONG COUPON" if first_gap > second_coupon - next_coupon else "SHORT COUPON"  # D265
+    ctype = "LONG COUPON" if first_gap > second_coupon - next_coupon else "SHORT COUPON"
 
-    ipo_short = ipo_long = 0.0                                        # D253 / D257
+    ipo_short = ipo_long = 0.0
     if is_perdana:
         if ctype == "SHORT COUPON":
             ipo_short = bbg_round(cpn_rate * meta.unit_value / 12
@@ -386,10 +342,10 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
         else:
             ipo_long = bbg_round(cpn_rate * meta.unit_value / 12
                                  * (one_back - settlement) / (one_back - two_back))
-    ipo_short_gross = units * ipo_short                               # D254 / D281
-    ipo_short_tax_r = xround(ipo_short_gross * TAX)                   # D256 / D283
+    ipo_short_gross = units * ipo_short
+    ipo_short_tax_r = xround(ipo_short_gross * TAX)
 
-    long_per_unit = 0.0                                               # D258 / D285
+    long_per_unit = 0.0
     if not is_perdana and ctype == "LONG COUPON":
         if cur == "IDR":
             long_per_unit = bbg_round(meta.unit_value * cpn_rate / (12 / fm)
@@ -400,7 +356,7 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
         else:
             long_per_unit = xround(days360_eu(last_coupon, one_back) / 360 * nominal * cpn_rate, 2)
 
-    long_tax_per_unit = 0.0                                           # D259 / D286
+    long_tax_per_unit = 0.0
     if not is_perdana and long_per_unit != 0 and ctype == "LONG COUPON":
         if cur == "IDR":
             long_tax_per_unit = bbg_round(meta.unit_value * cpn_rate / (12 / fm)
@@ -409,7 +365,7 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
             long_tax_per_unit = (meta.unit_value * cpn_rate / (12 / fm)
                                  * (one_back - settlement) / (one_back - two_back))
 
-    long_gross = 0.0                                                  # D262 / D289
+    long_gross = 0.0
     if ctype == "LONG COUPON":
         if is_perdana:
             long_gross = units * (ipo_long + per_unit)
@@ -418,7 +374,7 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
         else:
             long_gross = long_per_unit + per_unit
 
-    if is_perdana:                                                    # D263 / D290
+    if is_perdana:
         long_tax = long_gross * TAX
     elif long_tax_per_unit == 0:
         long_tax = short_gross * TAX
@@ -426,9 +382,9 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
         long_tax = units * (long_tax_per_unit + per_unit) * TAX
     else:
         long_tax = 0.0
-    long_tax_r = xround(long_tax)                                     # D264 / D291
+    long_tax_r = xround(long_tax)
 
-    if cur == "IDR":                                                  # D266 / D293
+    if cur == "IDR":
         if is_perdana:
             first_net = long_gross - long_tax_r if ctype == "LONG COUPON" else ipo_short_gross - ipo_short_tax_r
         else:
@@ -438,11 +394,10 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
     else:
         first_net = gross_coupon - short_tax_r if pref == "US" else gross_coupon
 
-    first_gross = gross_coupon                                        # D267 / D294
+    first_gross = gross_coupon
     if cur == "IDR" and is_perdana:
         first_gross = long_gross if ctype == "LONG COUPON" else ipo_short_gross
 
-    # D268 / D295 — note D295 tests the hold-to-maturity counts, not the sale ones.
     check_periods, check_months = net_check if net_check else (periods, months_invested)
     if check_periods == 1 and check_months < fm:
         per_period_net = first_net
@@ -451,8 +406,8 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
     else:
         per_period_net = gross_coupon
 
-    total_net = 0.0 if periods == 0 else (periods - 1) * per_period_net + first_net - accrued  # D271
-    total_gross = (periods - 1) * gross_coupon + first_gross                                    # D273
+    total_net = 0.0 if periods == 0 else (periods - 1) * per_period_net + first_net - accrued
+    total_gross = (periods - 1) * gross_coupon + first_gross
 
     return dict(periods=periods, months_invested=months_invested, per_unit=per_unit,
                 gross_coupon=gross_coupon, coupon_tax=coupon_tax, coupon_tax_r=coupon_tax_r,
@@ -471,9 +426,6 @@ def _schedule(start, freq_months, periods, first_amount, later_amount, stop):
     return rows
 
 
-# ===========================================================================
-# SIMULASI BELI
-# ===========================================================================
 def simulate_beli(code, market, settlement, nominal, px):
     meta = product_meta(code)
     if meta is None:
@@ -485,49 +437,46 @@ def simulate_beli(code, market, settlement, nominal, px):
 
     is_perdana = market == "Pasar Perdana"
     last_c, next_c = _resolve_coupons(meta, settlement, is_perdana)
-    second_c = edate(next_c, meta.freq_months)                        # D213
+    second_c = edate(next_c, meta.freq_months)
 
     acc = _accrued_block(meta, last_c, next_c, settlement, nominal, px, is_perdana)
 
-    basis = 1 if meta.currency == "IDR" else 0                        # D236
-    yfreq = 4 if meta.freq_months == 1 else 2                         # D237
+    basis = 1 if meta.currency == "IDR" else 0
+    yfreq = 4 if meta.freq_months == 1 else 2
     ytm = meta.coupon if is_perdana else xyield(
-        settlement, meta.maturity, meta.coupon, px * 100, 100, yfreq, basis)  # D19
+        settlement, meta.maturity, meta.coupon, px * 100, 100, yfreq, basis)
 
     s = _coupon_stream(meta, last_coupon=last_c, next_coupon=next_c, second_coupon=second_c,
                        settlement=settlement, nominal=nominal, units=acc["units"],
                        accrued=acc["accrued"], horizon=meta.maturity, is_perdana=is_perdana)
 
-    capital_gain = xround((1 - px) * nominal)                         # D276
-    cg_tax = xround(TAX * capital_gain) if meta.currency == "IDR" else 0.0   # D277
+    capital_gain = xround((1 - px) * nominal)
+    cg_tax = xround(TAX * capital_gain) if meta.currency == "IDR" else 0.0
     last_cpn_tax = (s["short_tax_r"] if (s["periods"] == 1 and s["months_invested"] < meta.freq_months)
-                    else s["coupon_tax_r"]) if meta.currency == "IDR" else s["coupon_tax"]  # D278
-    total_tax = trunc(0 if cg_tax + last_cpn_tax < 0 else cg_tax + last_cpn_tax)             # D279
-    final_cpn_net = s["gross_coupon"] - total_tax                                            # D280
+                    else s["coupon_tax_r"]) if meta.currency == "IDR" else s["coupon_tax"]
+    total_tax = trunc(0 if cg_tax + last_cpn_tax < 0 else cg_tax + last_cpn_tax)
+    final_cpn_net = s["gross_coupon"] - total_tax
 
-    coupon_adj = 0.0 if s["periods"] == 0 else (                                             # D272
+    coupon_adj = 0.0 if s["periods"] == 0 else (
         (s["periods"] - 2) * s["per_period_net"] + s["first_net"] - acc["accrued"] + final_cpn_net)
 
     return dict(
         meta=meta, is_perdana=is_perdana, last_coupon=last_c, next_coupon=next_c,
         accrued_days=acc["days"], accrued_interest=acc["accrued"], amount_paid=acc["total"],
         ytm=ytm, units=acc["units"], periods=s["periods"], months=s["months_invested"],
-        coupon_to_maturity=s["total_net"],                            # D271 / J19
-        proceeds_at_maturity=nominal + coupon_adj,                    # D274 / J20
-        received_at_maturity=final_cpn_net + nominal,                 # J21
+        coupon_to_maturity=s["total_net"],
+        proceeds_at_maturity=nominal + coupon_adj,
+        received_at_maturity=final_cpn_net + nominal,
         principal_back=nominal, final_coupon_gross=s["gross_coupon"],
         capital_gain=capital_gain, capital_gain_tax=cg_tax,
         last_coupon_tax=last_cpn_tax, total_tax=total_tax,
-        cumulative_nominal=nominal - nominal * px + coupon_adj,       # D283
-        cumulative_percent=(nominal - nominal * px + coupon_adj) / (nominal * px),  # D285
+        cumulative_nominal=nominal - nominal * px + coupon_adj,
+        cumulative_percent=(nominal - nominal * px + coupon_adj) / (nominal * px),
         schedule=_schedule(next_c, meta.freq_months, s["periods"],
                            s["first_net"], s["per_period_net"], meta.maturity),
     )
 
 
-# ===========================================================================
-# SIMULASI JUAL
-# ===========================================================================
 def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sell_price):
     meta = product_meta(code)
     if meta is None:
@@ -539,60 +488,57 @@ def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sel
     if sell_settlement > meta.maturity:
         raise SimError("Setelmen jual melewati tanggal jatuh tempo.")
 
-    # Buy leg. D209 infers the primary market from settlement == issue date.
     is_perdana = buy_settlement == meta.issued
     buy_last, buy_next = _resolve_coupons(meta, buy_settlement, is_perdana)
     buy_second = edate(buy_next, meta.freq_months)
     buy_acc = _accrued_block(meta, buy_last, buy_next, buy_settlement, nominal, buy_price, is_perdana)
 
-    # Sell leg — D235:D247.
     if _first_coupon_window(meta, sell_settlement):
         sell_last, sell_next = meta.first_accrual, meta.first_coupon
     else:
         sell_last, sell_next = _bracket_coupons(meta, sell_settlement)
     sell_acc = _accrued_block(meta, sell_last, sell_next, sell_settlement, nominal, sell_price, False)
 
-    holding = (sell_settlement - sell_last) if buy_settlement < sell_last else (sell_settlement - buy_settlement)  # D242
-    capital_gain = xround((sell_price - buy_price) * nominal)         # D250
-    cg_tax = xround(TAX * capital_gain)                               # D251
-    accrual_for_tax = xround(                                         # D252
+    holding = (sell_settlement - sell_last) if buy_settlement < sell_last else (sell_settlement - buy_settlement)
+    capital_gain = xround((sell_price - buy_price) * nominal)
+    cg_tax = xround(TAX * capital_gain)
+    accrual_for_tax = xround(
         (sell_acc["rounded"] if meta.currency == "IDR" else sell_acc["per_unit"])
         * (holding / sell_acc["days"] if sell_acc["days"] and holding < sell_acc["days"] else 1))
-    accrual_tax = xround(TAX * (sell_acc["units"] * accrual_for_tax    # D253
+    accrual_tax = xround(TAX * (sell_acc["units"] * accrual_for_tax
                                 if meta.currency == "IDR" else accrual_for_tax))
-    total_tax = trunc(0 if cg_tax + accrual_tax < 0 else cg_tax + accrual_tax) if meta.currency == "IDR" else 0.0  # D254
-    net_proceeds = (trunc(sell_acc["total"] if total_tax < 0 else sell_acc["total"] - total_tax)   # D255
+    total_tax = trunc(0 if cg_tax + accrual_tax < 0 else cg_tax + accrual_tax) if meta.currency == "IDR" else 0.0
+    net_proceeds = (trunc(sell_acc["total"] if total_tax < 0 else sell_acc["total"] - total_tax)
                     if meta.currency == "IDR" else sell_acc["total"])
 
     basis = 1 if meta.currency == "IDR" else 0
     yfreq = 4 if meta.freq_months == 1 else 2
-    ytm_hold = xyield(buy_settlement, meta.maturity, meta.coupon, buy_price * 100, 100, yfreq, basis)   # D231
+    ytm_hold = xyield(buy_settlement, meta.maturity, meta.coupon, buy_price * 100, 100, yfreq, basis)
     ytm_sell = xyield(buy_settlement, sell_settlement, meta.coupon,
-                      buy_price * 100, sell_price * 100, yfreq, basis)                                  # D265
+                      buy_price * 100, sell_price * 100, yfreq, basis)
 
     common = dict(last_coupon=buy_last, next_coupon=buy_next, second_coupon=buy_second,
                   settlement=buy_settlement, nominal=nominal, units=buy_acc["units"],
                   accrued=buy_acc["accrued"], is_perdana=is_perdana)
-    to_mat = _coupon_stream(meta, horizon=meta.maturity, **common)      # D319:D321
+    to_mat = _coupon_stream(meta, horizon=meta.maturity, **common)
     to_sale = _coupon_stream(meta, horizon=sell_last, months_horizon=sell_settlement,
-                             net_check=(to_mat["periods"], to_mat["months_invested"]), **common)  # D269:D299
+                             net_check=(to_mat["periods"], to_mat["months_invested"]), **common)
 
-    coupon_to_sale = (sell_acc["accrued"] - buy_acc["accrued"] - total_tax    # D298
+    coupon_to_sale = (sell_acc["accrued"] - buy_acc["accrued"] - total_tax
                       if to_sale["periods"] == 0 else
                       (to_sale["periods"] - 1) * to_sale["per_period_net"] + to_sale["first_net"]
                       - buy_acc["accrued"] + sell_acc["accrued"])
 
-    gain_sold = (net_proceeds - nominal * buy_price + coupon_to_sale     # D307
+    gain_sold = (net_proceeds - nominal * buy_price + coupon_to_sale
                  - sell_acc["accrued"] + total_tax)
 
-    cg_mat = xround((1 - buy_price) * nominal)                          # D324
-    cg_mat_tax = xround(TAX * cg_mat) if meta.currency == "IDR" else 0.0  # D326
+    cg_mat = xround((1 - buy_price) * nominal)
+    cg_mat_tax = xround(TAX * cg_mat) if meta.currency == "IDR" else 0.0
     last_cpn_tax = ((to_mat["short_tax_r"] if (to_mat["periods"] == 1
                      and to_mat["months_invested"] < meta.freq_months) else to_mat["coupon_tax_r"])
-                    if meta.currency == "IDR" else to_mat["coupon_tax"])  # D327
-    total_tax_mat = trunc(0 if cg_mat_tax + last_cpn_tax < 0 else cg_mat_tax + last_cpn_tax)  # D328
-    final_cpn_net = to_mat["gross_coupon"] - total_tax_mat                                     # D329
-    coupon_to_mat = 0.0 if to_mat["periods"] == 0 else (                                       # D321
+                    if meta.currency == "IDR" else to_mat["coupon_tax"])
+    final_cpn_net = to_mat["gross_coupon"] - total_tax_mat
+    coupon_to_mat = 0.0 if to_mat["periods"] == 0 else (
         (to_mat["periods"] - 2) * to_mat["per_period_net"] + to_mat["first_net"]
         - buy_acc["accrued"] + final_cpn_net)
 
@@ -605,21 +551,18 @@ def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sel
         capital_gain=capital_gain, total_tax=total_tax, net_proceeds=net_proceeds,
         ytm_hold=ytm_hold, ytm_sell=ytm_sell,
         coupon_to_sale=coupon_to_sale,
-        proceeds_if_sold=net_proceeds + coupon_to_sale - sell_acc["accrued"],   # D305
+        proceeds_if_sold=net_proceeds + coupon_to_sale - sell_acc["accrued"],
         months_if_sold=to_sale["months_invested"],
-        gain_if_sold=gain_sold, pct_if_sold=gain_sold / (nominal * buy_price),  # D309
-        proceeds_if_held=nominal + coupon_to_mat,                               # D330
+        gain_if_sold=gain_sold, pct_if_sold=gain_sold / (nominal * buy_price),
+        proceeds_if_held=nominal + coupon_to_mat,
         months_if_held=to_mat["months_invested"],
-        gain_if_held=nominal - nominal * buy_price + coupon_to_mat,             # D332
-        pct_if_held=(nominal - nominal * buy_price + coupon_to_mat) / (nominal * buy_price),  # D334
+        gain_if_held=nominal - nominal * buy_price + coupon_to_mat,
+        pct_if_held=(nominal - nominal * buy_price + coupon_to_mat) / (nominal * buy_price),
         schedule=_schedule(buy_next, meta.freq_months, to_sale["periods"],
                            to_sale["first_net"], to_sale["per_period_net"], sell_last),
     )
 
 
-# ===========================================================================
-# SIMULASI SWITCHING
-# ===========================================================================
 def simulate_switching(code1, buy_settlement1, nominal1, buy_price1,
                        sell_settlement1, sell_price1,
                        code2, settlement2, maturity2, nominal2, price2):
@@ -640,39 +583,38 @@ def simulate_switching(code1, buy_settlement1, nominal1, buy_price1,
         raise SimError("Jatuh tempo Produk 2 harus setelah setelmen beli Produk 1 — "
                        "lama investasi tidak dapat dihitung.")
 
-    is_perdana2 = settlement2 == meta2.issued                          # D365
+    is_perdana2 = settlement2 == meta2.issued
     last2, next2 = _resolve_coupons(meta2, settlement2, is_perdana2)
-    # D374 omits the 2-decimal rounding that D220 and D218 apply.
     acc2 = _accrued_block(meta2, last2, next2, settlement2, nominal2, price2,
                           is_perdana2, round_accrual=False)
 
     basis2 = 1 if meta2.currency == "IDR" else 0
     yfreq2 = 4 if meta2.freq_months == 1 else 2
-    ytm2 = xyield(settlement2, maturity2, meta2.coupon, price2 * 100, 100, yfreq2, basis2)  # D388
+    ytm2 = xyield(settlement2, maturity2, meta2.coupon, price2 * 100, 100, yfreq2, basis2)
 
-    span2 = datedif_m(edate(next2, -meta2.freq_months), maturity2)      # D391
+    span2 = datedif_m(edate(next2, -meta2.freq_months), maturity2)
     periods2 = span2 if meta2.freq_months == 1 else span2 // 6
-    months2 = datedif_m(settlement2, maturity2)                        # D392
+    months2 = datedif_m(settlement2, maturity2)
 
     per_period2 = 12 if meta2.freq_months == 1 else 2
-    base2 = meta2.unit_value * meta2.coupon / per_period2              # D401
+    base2 = meta2.unit_value * meta2.coupon / per_period2
     if meta2.currency == "IDR":
         cpu2 = bbg_round(base2)
     elif meta2.prefix == "US":
         cpu2 = xround(base2, 2)
     else:
         cpu2 = nominal2 * meta2.coupon / per_period2
-    gross2 = acc2["units"] * cpu2 if meta2.currency == "IDR" else cpu2  # D402
-    tax2_r = xround(gross2 * TAX) if meta2.currency == "IDR" else 0.0   # D404
-    net2 = gross2 - tax2_r                                              # D425
+    gross2 = acc2["units"] * cpu2 if meta2.currency == "IDR" else cpu2
+    tax2_r = xround(gross2 * TAX) if meta2.currency == "IDR" else 0.0
+    net2 = gross2 - tax2_r
 
-    coupon_to_horizon2 = (acc2["accrued"] if periods2 == 0                # D428
+    coupon_to_horizon2 = (acc2["accrued"] if periods2 == 0
                           else (periods2 - 1) * net2 + gross2 - acc2["accrued"])
 
-    capital = nominal1 * buy_price1                                     # D453
-    gain_sell1 = p1["net_proceeds"] - capital                           # D455
-    gain_buy2 = p1["net_proceeds"] - acc2["total"]                      # D459
-    gain_switch = gain_sell1 + p1["coupon_to_sale"] + gain_buy2 + coupon_to_horizon2  # D463
+    capital = nominal1 * buy_price1
+    gain_sell1 = p1["net_proceeds"] - capital
+    gain_buy2 = p1["net_proceeds"] - acc2["total"]
+    gain_switch = gain_sell1 + p1["coupon_to_sale"] + gain_buy2 + coupon_to_horizon2
 
     return dict(
         p1=p1, meta2=meta2, is_perdana2=is_perdana2,
@@ -681,19 +623,16 @@ def simulate_switching(code1, buy_settlement1, nominal1, buy_price1,
         accrued_days2=acc2["days"], accrued2=acc2["accrued"], amount_paid2=acc2["total"],
         ytm2=ytm2, coupon_to_horizon2=coupon_to_horizon2,
         periods2=periods2, months2=months2,
-        months_switched=datedif_m(buy_settlement1, maturity2),          # D452
+        months_switched=datedif_m(buy_settlement1, maturity2),
         capital=capital, proceeds_sell1=p1["net_proceeds"], gain_sell1=gain_sell1,
         coupon_until_sale1=p1["coupon_to_sale"], paid2=acc2["total"], gain_buy2=gain_buy2,
-        total_return_switch=gain_buy2 + nominal1 + coupon_to_horizon2,  # D461
-        gain_switch=gain_switch, pct_switch=gain_switch / capital,      # D465
+        total_return_switch=gain_buy2 + nominal1 + coupon_to_horizon2,
+        gain_switch=gain_switch, pct_switch=gain_switch / capital,
         top_up=p1["net_proceeds"] - acc2["total"],
         schedule2=_schedule(next2, meta2.freq_months, periods2, gross2, net2, maturity2),
     )
 
 
-# ===========================================================================
-# Presentation helpers
-# ===========================================================================
 def money(value, currency="IDR", decimals=None):
     if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
         return "—"
@@ -717,7 +656,6 @@ def num(value, decimals=0):
 
 
 def parse_number(text):
-    """Accept 2.000.000, 2,000,000, 2000000 and 1234.56 alike."""
     if text is None:
         return None
     s = str(text).strip().replace(" ", "").replace("\u00a0", "")
@@ -737,12 +675,6 @@ def parse_number(text):
 
 
 def _full_width():
-    """
-    Return the kwargs that make a widget span its container, tolerant of the
-    Streamlit version. Newer builds prefer width='stretch'; older ones only
-    understand use_container_width=True. Picking at runtime avoids a hard
-    break whichever version Streamlit Cloud resolves.
-    """
     import inspect
     try:
         params = inspect.signature(st.button).parameters
@@ -757,11 +689,6 @@ FULL_WIDTH = _full_width()
 
 
 def money_input(label, default, key, cur_hint="Rp"):
-    """
-    Text input for a nominal amount that echoes the parsed value back in
-    grouped form (Rp 200.000.000) so the RM can confirm the zero count at a
-    glance. Returns the raw string; caller runs parse_number.
-    """
     raw = st.text_input(label, default, key=key)
     val = parse_number(raw)
     if val is not None:
@@ -771,11 +698,6 @@ def money_input(label, default, key, cur_hint="Rp"):
     return raw
 
 
-# ---------------------------------------------------------------------------
-# PNG export. Drawn server-side with matplotlib so the download works
-# identically on every browser and needs no client-side capture library.
-# Only the fonts bundled with matplotlib are used — nothing is fetched.
-# ---------------------------------------------------------------------------
 INK = "#0f2233"
 MUTED = "#5c7085"
 LINE = "#dbe3ea"
@@ -786,78 +708,14 @@ SANS = "DejaVu Sans"
 MONO = "DejaVu Sans Mono"
 
 
-def render_png(title, subtitle, sections, footer_lines):
-    """sections: list of (heading, [(label, value, tone, indent), ...])."""
-    line_h = 0.235
-    # Height is computed from the exact drawing constants below, not estimated,
-    # so long simulations never clip the disclaimer off the bottom.
-    head_h = 0.55 + 0.34 + 0.26 + 0.34
-    body_h = sum(0.20 + 0.10 + len(body) * line_h + 0.24 for _, body in sections)
-    foot_h = 0.05 + 0.22 + 0.20 + len(footer_lines) * 0.175
-    height = head_h + body_h + foot_h + 0.30
-    width = 8.6
-
-    fig = plt.figure(figsize=(width, height), dpi=200)
-    fig.patch.set_facecolor("white")
-    ax = fig.add_axes([0, 0, 1, 1])
-    ax.set_xlim(0, width)
-    ax.set_ylim(0, height)
-    ax.axis("off")
-
-    left, right = 0.55, width - 0.55
-    y = height - 0.55
-
-    ax.add_patch(plt.Rectangle((left, y - 0.30), 0.075, 0.42, color=MARKER, zorder=3))
-    ax.text(left + 0.20, y, "KALKULATOR OBLIGASI", fontsize=7.5, color=MUTED,
-            family=SANS, weight="bold", va="center")
-    y -= 0.34
-    ax.text(left + 0.20, y, title.upper(), fontsize=15, color=INK, family=SANS,
-            weight="bold", va="center")
-    ax.text(right, y, subtitle, fontsize=8, color=MUTED, family=MONO,
-            ha="right", va="center")
-    y -= 0.26
-    ax.plot([left, right], [y, y], color=INK, lw=1.4)
-    y -= 0.34
-
-    for heading, body in sections:
-        ax.text(left, y, heading.upper(), fontsize=7.5, color=MUTED,
-                family=SANS, weight="bold", va="center")
-        y -= 0.20
-        ax.plot([left, right], [y + 0.04, y + 0.04], color=LINE, lw=0.7)
-        y -= 0.10
-        for label, value, tone, indent in body:
-            colour = {"gain": ACCENT, "loss": LOSS, "strong": INK}.get(tone, INK)
-            weight = "bold" if tone == "strong" else "normal"
-            ax.text(left + (0.22 if indent else 0), y, ("– " if indent else "") + label,
-                    fontsize=8.5, color=MUTED if indent else INK, family=SANS, va="center")
-            ax.text(right, y, value, fontsize=9, color=colour, family=MONO,
-                    weight=weight, ha="right", va="center")
-            y -= line_h
-        y -= 0.24
-
-    y -= 0.05
-    ax.plot([left, right], [y, y], color=LINE, lw=0.7)
-    y -= 0.22
-    ax.text(left, y, "DISCLAIMER", fontsize=6.5, color=MUTED, family=SANS,
-            weight="bold", va="center")
-    y -= 0.20
-    for text in footer_lines:
-        ax.text(left, y, "• " + text, fontsize=6, color=MUTED, family=SANS, va="center")
-        y -= 0.175
-
-    buf = io.BytesIO()
-    FigureCanvasAgg(fig).print_png(buf)
-    plt.close(fig)
-    return buf.getvalue()
+def _paren(v):
+    if v is None:
+        return "—"
+    body = f"{abs(v):,.2f}"
+    return f"({body})" if v < 0 else body
 
 
-# ---------------------------------------------------------------------------
-# Faithful "Simulasi Beli" export — reproduces the original workbook layout:
-# yellow product banner, black header bars, the two-panel split, the numbered
-# coupon schedule (collapsed to 1..7 + final for long tenors), the keterangan
-# notes, and the full disclaimer box.
-# ---------------------------------------------------------------------------
-from matplotlib.patches import FancyBboxPatch  # noqa: E402
+from matplotlib.patches import FancyBboxPatch
 
 _EX_BLACK = "#111111"
 _EX_HAIR = "#e4eaef"
@@ -872,24 +730,7 @@ DISCLAIMER_FULL = [
     "YTM merupakan potensi tingkat pengembalian (disetahunkan) yang akan diperoleh jika Obligasi dipegang hingga jatuh tempo, dengan diasumsikan bahwa pembayaran kupon dilakukan sesuai jadwal dan diinvestasikan kembali pada rate yang sama.",
     "Tarif pajak yang digunakan dalam simulasi kalkulator ini menggunakan tarif pajak Obligasi sebesar 10%.",
     "Perhitungan ini belum dipotong biaya (apabila ada).",
-    "Simulasi ini tidak dapat digunakan untuk produk FR0088 & FR0089 yang ditransaksikan pada tanggal 6 -7 Januari 2021",
 ]
-
-
-DISCLAIMER_SWITCH = [
-    "Kalkulator ini disediakan hanya sebagai alat bantu simulasi Obligasi dan tidak dimaksudkan untuk menyediakan rekomendasi atau saran apa pun.",
-    "Simulasi, harga dan YTM Obligasi yang ditampilkan hanya bersifat indikatif, sehingga terdapat kemungkinan perbedaan dengan perhitungan, harga dan YTM Obligasi pada saat nasabah melakukan transaksi yang sebenarnya.",
-    "Tarif pajak yang digunakan dalam simulasi kalkulator ini menggunakan tarif pajak Obligasi sebesar 10%.",
-    "Perhitungan ini belum dipotong biaya (apabila ada).",
-]
-
-
-def _paren(v):
-    """Accounting style — negatives in parentheses, as the workbook shows them."""
-    if v is None:
-        return "—"
-    body = f"{abs(v):,.2f}"
-    return f"({body})" if v < 0 else body
 
 
 def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, price_pct,
@@ -911,7 +752,6 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
 
     ML, MR, MT = 0.35, 0.35, 0.30
     gutter = 0.45
-    col_x = ML
     col_w = (W - ML - MR - gutter) / 2
     rcol_x = ML + col_w + gutter
     top = H - MT
@@ -923,25 +763,19 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
         ax.add_patch(plt.Rectangle((x, y - h), w, h, facecolor=_EX_BLACK, edgecolor="none", zorder=2))
         text(x + w / 2, y - h / 2, label, size=11, color="white", weight="bold", ha="center")
 
-    # ---- title band (full width) ----
-    ax.text(ML, top - 0.02, sim_title, fontsize=17, color=INK, weight="bold",
-            family=SANS, ha="left", va="top")
-    ax.text(W - MR, top - 0.10, "Kalkulator Obligasi",
-            fontsize=9.5, color=MUTED, family=SANS, ha="right", va="top")
-    ax.plot([ML, W - MR], [top - title_h + 0.06, top - title_h + 0.06],
-            color=INK, lw=1.6)
+    ax.text(ML, top - 0.02, sim_title, fontsize=17, color=INK, weight="bold", family=SANS, ha="left", va="top")
+    ax.text(W - MR, top - 0.10, "Kalkulator Obligasi", fontsize=9.5, color=MUTED, family=SANS, ha="right", va="top")
+    ax.plot([ML, W - MR], [top - title_h + 0.06, top - title_h + 0.06], color=INK, lw=1.6)
     top -= title_h + 0.14
 
-    # ---- left column ----
     y = top
     bh = 0.52
-    ax.add_patch(FancyBboxPatch((col_x, y - bh), col_w, bh,
-                                boxstyle="round,pad=0,rounding_size=0.02",
+    ax.add_patch(FancyBboxPatch((ML, y - bh), col_w, bh, boxstyle="round,pad=0,rounding_size=0.02",
                                 facecolor=_EX_MARKER, edgecolor=_EX_MARKER_EDGE, lw=1.2, zorder=2))
-    text(col_x + 0.14, y - bh / 2, code, size=20, weight="bold")
+    text(ML + 0.14, y - bh / 2, code, size=20, weight="bold")
     y -= bh + 0.22
 
-    bar(col_x, y, col_w, 0.34, "Data Produk Obligasi  (NASABAH BELI)")
+    bar(ML, y, col_w, 0.34, "Data Produk Obligasi  (NASABAH BELI)")
     y -= 0.34
 
     left_rows = [
@@ -960,12 +794,10 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
     for lab, val, hl in left_rows:
         ry = y - rh
         if hl:
-            ax.add_patch(plt.Rectangle((col_x + col_w * 0.52, ry), col_w * 0.48, rh,
-                                       facecolor=_EX_MARKER, edgecolor="none", zorder=1))
-        ax.add_patch(plt.Rectangle((col_x, ry), col_w, rh, facecolor="none",
-                                   edgecolor=_EX_LINE, lw=0.6, zorder=1.5))
-        text(col_x + 0.10, ry + rh / 2, lab, size=8.5, weight="bold")
-        text(col_x + col_w - 0.10, ry + rh / 2, val, size=8.5, weight="bold", ha="right", family=MONO)
+            ax.add_patch(plt.Rectangle((ML + col_w * 0.52, ry), col_w * 0.48, rh, facecolor=_EX_MARKER, edgecolor="none", zorder=1))
+        ax.add_patch(plt.Rectangle((ML, ry), col_w, rh, facecolor="none", edgecolor=_EX_LINE, lw=0.6, zorder=1.5))
+        text(ML + 0.10, ry + rh / 2, lab, size=8.5, weight="bold")
+        text(ML + col_w - 0.10, ry + rh / 2, val, size=8.5, weight="bold", ha="right", family=MONO)
         y = ry
     y -= 0.16
 
@@ -975,108 +807,17 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
         ("Kupon Berjalan / Accrued Interest", _paren(r["accrued_interest"])),
     ]:
         ry = y - rh
-        ax.add_patch(plt.Rectangle((col_x, ry), col_w, rh, facecolor=_EX_PANEL,
-                                   edgecolor=_EX_LINE, lw=0.8, zorder=1))
-        text(col_x + 0.10, ry + rh / 2, lab, size=8, weight="bold")
-        text(col_x + col_w - 0.10, ry + rh / 2, val, size=8.5, weight="bold", ha="right", family=MONO)
+        ax.add_patch(plt.Rectangle((ML, ry), col_w, rh, facecolor=_EX_PANEL, edgecolor=_EX_LINE, lw=0.8, zorder=1))
+        text(ML + 0.10, ry + rh / 2, lab, size=8, weight="bold")
+        text(ML + col_w - 0.10, ry + rh / 2, val, size=8.5, weight="bold", ha="right", family=MONO)
         y = ry - 0.06
     y -= 0.14
 
     tbh = 0.56
-    ax.add_patch(plt.Rectangle((col_x, y - tbh), col_w, tbh, facecolor=_EX_BLACK, zorder=2))
-    text(col_x + 0.16, y - tbh / 2, "Jumlah Indikatif yang Dibayar", size=12.5, color="white", weight="bold")
-    text(col_x + col_w - 0.16, y - tbh / 2, _paren(r["amount_paid"]), size=13,
-         color="white", weight="bold", ha="right", family=MONO)
+    ax.add_patch(plt.Rectangle((ML, y - tbh), col_w, tbh, facecolor=_EX_BLACK, zorder=2))
+    text(ML + 0.16, y - tbh / 2, "Jumlah Indikatif yang Dibayar", size=12.5, color="white", weight="bold")
+    text(ML + col_w - 0.16, y - tbh / 2, _paren(r["amount_paid"]), size=13, color="white", weight="bold", ha="right", family=MONO)
     y -= tbh + 0.18
-
-    text(col_x, y, "Keterangan :", size=8.5)
-    y -= 0.26
-    ax.add_patch(plt.Rectangle((col_x, y - 0.02), 0.16, 0.16, facecolor=_EX_MARKER,
-                               edgecolor=_EX_MARKER_EDGE, lw=0.6))
-    text(col_x + 0.24, y + 0.06, "Kolom yang di-highlight kuning WAJIB diisi dengan data terkini.", size=7.5)
-    y -= 0.30
-    for i, note in enumerate([
-        "Kupon yang diterima hingga JT = total kupon (net, tidak termasuk pajak capital gain/loss) - accrued kupon beli",
-        "Pengembalian hingga JT = nominal + total kupon (net) yang diterima hingga JT - pajak capital gain/loss",
-        "Nominal yang diterima saat JT = pengembalian pokok + kupon saat jatuh tempo (gross) - total pajak",
-        "Total keuntungan/kerugian = total kupon (gross) yang diterima hingga JT + capital gain/loss - total pajak",
-    ], 1):
-        text(col_x + 0.02, y + 0.06, str(i), size=7.5, weight="bold")
-        text(col_x + 0.24, y + 0.06, note, size=6.6)
-        y -= 0.235
-
-    # ---- right column ----
-    y = top
-    bar(rcol_x, y, col_w, 0.40, "Proyeksi Pendapatan yang Diterima Nasabah (nett)")
-    y -= 0.40 + 0.06
-
-    def rrow(cy, lab, val, *, lab_size=8.8, val_size=8.8, bold_lab=True, bold_val=False,
-             col=INK, dot=False, indent=0.0, mid=None, hair=True):
-        if hair:
-            ax.plot([rcol_x, rcol_x + col_w], [cy, cy], color=_EX_HAIR, lw=0.6)
-        yy = cy - 0.155
-        prefix = "\u25cf " if dot else ""
-        text(rcol_x + 0.06 + indent, yy, prefix + lab, size=lab_size,
-             weight="bold" if bold_lab else "normal")
-        if mid is not None:
-            text(rcol_x + col_w * 0.60, yy, mid, size=val_size, ha="right", family=MONO)
-        text(rcol_x + col_w - 0.08, yy, val, size=val_size, ha="right", family=MONO,
-             weight="bold" if bold_val else "normal", color=col)
-        return cy - 0.31
-
-    y = rrow(y, "Nominal yang dibayar pada tanggal :", _paren(-r["amount_paid"]),
-             mid=fmt_date_en(settle_serial), bold_val=True, hair=False)
-    y = rrow(y, "Kupon (tidak termasuk pajak capital gain/loss) :", "")
-
-    def sched_row(cy, n, date, amt):
-        ax.text(rcol_x + col_w * 0.62, cy - 0.155, fmt_date_en(date), fontsize=8.4,
-                family=MONO, ha="left", color=INK, va="center")
-        return rrow(cy, "", _paren(amt), mid=str(n), bold_lab=False, val_size=8.4, lab_size=8.4)
-
-    if len(sched) <= 8:
-        for n, date, amt in sched:
-            y = sched_row(y, n, date, amt)
-    elif sched:
-        for n, date, amt in sched[:7]:
-            y = sched_row(y, n, date, amt)
-        ax.plot([rcol_x, rcol_x + col_w], [y, y], color=_EX_HAIR, lw=0.6)
-        for gx in (0.12, 0.60, 0.90):
-            ax.text(rcol_x + col_w * gx, y - 0.16, "\u22ee", fontsize=9, ha="center",
-                    va="center", color=MUTED)
-        y -= 0.31
-        last = sched[-1]
-        y = sched_row(y, last[0], last[1], last[2])
-
-    for lab, val, bold, dot, ind in [
-        ("Kupon yang diterima hingga JT1 :", r["coupon_to_maturity"], True, False, 0),
-        ("Pengembalian hingga JT2 :", r["proceeds_at_maturity"], True, False, 0),
-        ("Nominal yang diterima saat JT3 :", r["received_at_maturity"], True, False, 0),
-        ("Pengembalian pokok", r["principal_back"], False, True, 0),
-        ("Kupon saat jatuh tempo (gross)", r["final_coupon_gross"], False, True, 0),
-        ("Capital gain/loss", r["capital_gain"], False, True, 0),
-        ("Total Pajak", r["total_tax"], False, True, 0),
-        ("Pajak Kupon", r["last_coupon_tax"], False, False, 0.22),
-        ("Pajak capital gain/loss", r["capital_gain_tax"], False, False, 0.22),
-    ]:
-        y = rrow(y, lab, _paren(val), bold_lab=bold, bold_val=bold, dot=dot, indent=ind)
-
-    ax.plot([rcol_x, rcol_x + col_w], [y, y], color=INK, lw=1.0)
-    y = rrow(y, "Total keuntungan/kerugian :", "", bold_lab=True, hair=False)
-    y = rrow(y, "Nominal kumulatif", _paren(r["cumulative_nominal"]), dot=True, bold_val=True)
-    y = rrow(y, "Persentase kumulatif", pct(r["cumulative_percent"]), dot=True, bold_val=True)
-
-    # ---- disclaimer box, pinned to the bottom margin ----
-    box_bottom = 0.28
-    box_top = box_bottom + disc_h
-    ax.add_patch(plt.Rectangle((ML, box_bottom), W - ML - MR, disc_h,
-                               facecolor="white", edgecolor=INK, lw=1.0))
-    dy = box_top - 0.20
-    text(ML + 0.12, dy, "DISCLAIMER :", size=8, weight="bold")
-    dy -= 0.215
-    for line in DISCLAIMER_FULL:
-        text(ML + 0.16, dy, "\u25cf", size=6)
-        text(ML + 0.34, dy, line, size=6.4)
-        dy -= 0.208
 
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
@@ -1085,12 +826,83 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
 
 
 # ---------------------------------------------------------------------------
-# Shared drawing toolkit for the faithful Jual / Switching exports. Same visual
-# vocabulary as render_beli_export: yellow code banner, black header bars, a
-# left data panel with yellow-highlighted required cells, grey derived rows,
-# black total bars, and a right projection panel with a numbered coupon
-# schedule. Kept in one place so all three exports stay pixel-consistent.
+# Simple & Easy-to-Understand Export for Simulasi Kredit (Opsi 1 / Opsi 2)
 # ---------------------------------------------------------------------------
+def render_kredit_export(opt_title, data_dict):
+    W, H = 8.5, 9.2
+    fig = plt.figure(figsize=(W, H), dpi=170)
+    fig.patch.set_facecolor("white")
+    ax = fig.add_axes([0, 0, 1, 1])
+    ax.set_xlim(0, W)
+    ax.set_ylim(0, H)
+    ax.axis("off")
+
+    ML, MR = 0.6, 0.6
+    top = H - 0.5
+
+    def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center"):
+        ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=SANS)
+
+    # Title Banner
+    ax.text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", fontsize=15, color=INK, weight="bold", family=SANS, va="top")
+    ax.text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", fontsize=9, color=MUTED, family=MONO, ha="right", va="top")
+    top -= 0.4
+    ax.plot([ML, W - MR], [top, top], color=INK, lw=1.5)
+    top -= 0.4
+
+    cur = data_dict["currency"]
+    
+    def section_header(title, y_pos):
+        ax.add_patch(plt.Rectangle((ML, y_pos - 0.3), W - ML - MR, 0.3, facecolor=_EX_BLACK, edgecolor="none"))
+        ax.text(ML + 0.15, y_pos - 0.15, title, fontsize=10, color="white", weight="bold", va="center", family=SANS)
+        return y_pos - 0.45
+
+    def add_rows(rows, y_pos):
+        rh = 0.3
+        for lab, val, bold in rows:
+            ry = y_pos - rh
+            ax.add_patch(plt.Rectangle((ML, ry), W - ML - MR, rh, facecolor="#f9fbfe", edgecolor=_EX_LINE, lw=0.6))
+            text(ML + 0.15, ry + rh/2, lab, size=9, weight="bold" if bold else "normal")
+            text(W - MR - 0.15, ry + rh/2, val, size=9, weight="bold" if bold else "normal", ha="right")
+            y_pos = ry
+        return y_pos - 0.15
+
+    # 1. Parameter Utama
+    top = section_header("1. PARAMETER KREDIT & INVESTASI", top)
+    top = add_rows([
+        ("Produk Obligasi", data_dict["code"], False),
+        ("Nominal Investasi", data_dict["nominal_fmt"], False),
+        ("LTV (%)", f"{data_dict['ltv']*100:.1f}%", False),
+        ("Plafon Kredit", data_dict["plafon_fmt"], True),
+        ("Suku Bunga Kredit (% p.a)", f"{data_dict['bunga_kredit']*100:.2f}%", False),
+        ("Tenor Pinjaman", f"{data_dict['tenor']} Tahun", False),
+    ], top)
+
+    # 2. Simulasi Cashflow
+    top = section_header("2. ESTIMASI PENDAPATAN & BEBAN", top)
+    top = add_rows([
+        ("Bunga Investasi / Tahun (Nett)", data_dict["inv_nett_fmt"], True),
+        ("Bunga Pinjaman / Tahun (Maksimal)", data_dict["pinj_tahun_fmt"], False),
+        ("Cicilan / Bulan (Metode Anuitas - IL)", data_dict["pmt_fmt"], True),
+        ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False),
+    ], top)
+
+    # Disclaimer Box inside export
+    disc_top = 1.4
+    ax.add_patch(plt.Rectangle((ML, 0.4), W - ML - MR, disc_top, facecolor="white", edgecolor=INK, lw=0.8))
+    dy = 0.4 + disc_top - 0.2
+    text(ML + 0.15, dy, "DISCLAIMER:", size=8, weight="bold")
+    dy -= 0.22
+    for line in DISCLAIMER_FULL:
+        text(ML + 0.25, dy, f"• {line}", size=6.2, color=MUTED)
+        dy -= 0.20
+
+    buf = io.BytesIO()
+    FigureCanvasAgg(fig).print_png(buf)
+    plt.close(fig)
+    return buf.getvalue()
+
+
 class _Sheet:
     def __init__(self, ax, col_x, col_w):
         self.ax = ax
@@ -1103,7 +915,6 @@ class _Sheet:
                      ha=ha, va=va, family=family)
 
     def banner(self, x, y, w, code):
-        """Yellow rounded product-code banner."""
         bh = 0.52
         self.ax.add_patch(FancyBboxPatch((x, y - bh), w, bh,
                           boxstyle="round,pad=0,rounding_size=0.02",
@@ -1127,7 +938,6 @@ class _Sheet:
         return y - h
 
     def data_rows(self, x, y, w, rows, rh=0.285):
-        """rows: (label, value, highlight_bool). Yellow fill on highlighted cells."""
         for lab, val, hl in rows:
             ry = y - rh
             if hl:
@@ -1142,7 +952,6 @@ class _Sheet:
         return y
 
     def derived_rows(self, x, y, w, rows, rh=0.285):
-        """Grey panel rows for computed values."""
         for lab, val in rows:
             ry = y - rh
             self.ax.add_patch(plt.Rectangle((x, ry), w, rh, facecolor=_EX_PANEL,
@@ -1169,7 +978,6 @@ class _Sheet:
         return cy - 0.31
 
     def schedule(self, x, w, cy, sched, *, date_frac=0.62):
-        """Numbered coupon schedule, collapsed 1..7 + ellipsis + final if long."""
         def one(cy, n, date, amt):
             self.ax.text(x + w * date_frac, cy - 0.155, fmt_date_en(date),
                          fontsize=8.4, family=MONO, ha="left", color=INK, va="center")
@@ -1226,10 +1034,6 @@ def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
         dy -= 0.208
 
 
-# ---------------------------------------------------------------------------
-# SIMULASI JUAL — two stacked data panels (beli + jual) on the left, projection
-# with sell-vs-hold branches on the right. Matches the uploaded reference.
-# ---------------------------------------------------------------------------
 def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
                        sell_txn, sell_settle, sell_price, sim_title="SIMULASI JUAL"):
     cur = r["meta"].currency
@@ -1243,7 +1047,6 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     rcol_x = ML + col_w + gutter
     s = _Sheet(ax, ML, col_w)
 
-    # ===== LEFT =====
     y = top
     y = s.banner(ML, y, col_w, code) - 0.22
     y = s.bar(ML, y, col_w, "Data Produk Obligasi  (NASABAH BELI)")
@@ -1287,17 +1090,6 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     y = s.total_bar(ML, y, col_w, "Jumlah Indikatif yang Diterima (Nett)", _paren(r["net_proceeds"]))
     y -= 0.24
 
-    s.text(ML, y, "Keterangan :", size=8.5)
-    y -= 0.26
-    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.16, 0.16, facecolor=_EX_MARKER,
-                 edgecolor=_EX_MARKER_EDGE, lw=0.6))
-    s.text(ML + 0.24, y + 0.06, "Kolom yang di-highlight kuning WAJIB diisi dengan data terkini.", size=7.5)
-    y -= 0.28
-    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.16, 0.16, facecolor="#8a9a5b",
-                 edgecolor="#6f7d47", lw=0.6))
-    s.text(ML + 0.24, y + 0.06, "Apabila nasabah membeli di Pasar Perdana, maka akan terisi N/A.", size=7.5)
-
-    # ===== RIGHT =====
     y = top
     y = s.bar(rcol_x, y, col_w, "Proyeksi Pendapatan yang Diterima Nasabah (nett)", h=0.40) - 0.06
     y = s.rrow(rcol_x, col_w, y, "Nominal yang dibayar pada tanggal :",
@@ -1332,21 +1124,13 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     return buf.getvalue()
 
 
-# ---------------------------------------------------------------------------
-# SIMULASI SWITCHING — three stacked panels on the left (P1 buy, P1 sell,
-# P2 buy) plus two black totals; right side shows P1 coupons, P2 coupons, and
-# the hold-vs-switch comparison. Matches the uploaded reference.
-# ---------------------------------------------------------------------------
 def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
                             code2, s2, m2, nom2, p2, sim_title="SIMULASI SWITCHING"):
     p1 = r["p1"]
     cur1 = p1["meta"].currency
     cur2 = r["meta2"].currency
     meta1, meta2 = p1["meta"], r["meta2"]
-    disc_h = 0.26 + len(DISCLAIMER_SWITCH) * 0.208 + 0.14
-    # Left column is the tallest element; its content depth below `top` is a
-    # fixed ~15.32in. Size the canvas so that depth plus the disclaimer plus the
-    # bottom margin fit exactly, then pin the disclaimer under the keterangan.
+    disc_h = 0.26 + len(DISCLAIMER_FULL) * 0.208 + 0.14
     W = 12.6
     _left_depth = 15.32
     H = 0.94 + _left_depth + disc_h + 0.28
@@ -1357,7 +1141,6 @@ def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
     rcol_x = ML + col_w + gutter
     s = _Sheet(ax, ML, col_w)
 
-    # ===== LEFT =====
     y = top
     y = s.banner(ML, y, col_w, code1) - 0.20
     y = s.bar(ML, y, col_w, "Data Produk Obligasi (NASABAH BELI PRODUK 1)", size=10)
@@ -1418,31 +1201,8 @@ def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
     y -= 0.06
     topup_label = "Perlu Top up sebesar" if r["top_up"] < 0 else "Kelebihan dikreditkan"
     y = s.total_bar(ML, y, col_w, topup_label, _paren(abs(r["top_up"])))
-    y -= 0.26
-
-    # keterangan notes (match reference)
-    s.text(ML, y, "Keterangan :", size=8.5)
-    y -= 0.22
-    s.text(ML + 0.02, y + 0.06, "1)", size=7.5, weight="bold")
-    s.text(ML + 0.26, y + 0.06, "Produk 1 & 2 hanya dapat diisi dengan Produk Mata Uang yang sama.", size=7)
-    y -= 0.205
-    s.text(ML + 0.02, y + 0.06, "2)", size=7.5, weight="bold")
-    s.text(ML + 0.26, y + 0.06, "Produk 2 dapat diisi dengan Produk Obligasi Pasar Perdana maupun Sekunder.", size=7)
-    y -= 0.24
-    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor=_EX_MARKER,
-                 edgecolor=_EX_MARKER_EDGE, lw=0.6))
-    s.text(ML + 0.24, y + 0.055, "Kolom yang di-highlight kuning WAJIB diisi dengan data terkini.", size=7)
-    y -= 0.22
-    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor="#8a9a5b",
-                 edgecolor="#6f7d47", lw=0.6))
-    s.text(ML + 0.24, y + 0.055, "Apabila nasabah membeli di Pasar Perdana, maka harus diisi N/A.", size=7)
-    y -= 0.22
-    ax.add_patch(plt.Rectangle((ML, y - 0.02), 0.15, 0.15, facecolor="#a9c7e8",
-                 edgecolor="#7fa8d0", lw=0.6))
-    s.text(ML + 0.24, y + 0.055, "Tanggal JT Produk 2 dapat diisi sesuai JT Produk 2 atau sama dengan JT Produk 1.", size=7)
     left_bottom = y - 0.22
 
-    # ===== RIGHT =====
     y = top
     y = s.bar(rcol_x, y, col_w, "Proyeksi Pendapatan yang Diterima Nasabah (nett)", h=0.40) - 0.06
     y = s.rrow(rcol_x, col_w, y, "Nominal yang dibayar pada tanggal :",
@@ -1476,20 +1236,12 @@ def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
     y = s.rrow(rcol_x, col_w, y, "Nominal kumulatif", _paren(r["gain_switch"]), indent=0.22)
     y = s.rrow(rcol_x, col_w, y, "Persentase kumulatif", pct(r["pct_switch"]), indent=0.22)
 
-    _disclaimer_box(ax, W, ML, MR, disc_h, lines=DISCLAIMER_SWITCH, top=left_bottom)
+    _disclaimer_box(ax, W, ML, MR, disc_h, lines=DISCLAIMER_FULL, top=left_bottom)
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
     plt.close(fig)
     return buf.getvalue()
 
-
-DISCLAIMER = [
-    "Kalkulator ini hanya alat bantu simulasi dan bukan rekomendasi atau saran investasi.",
-    "Simulasi, harga, dan YTM bersifat indikatif; dapat berbeda dengan perhitungan saat transaksi sebenarnya.",
-    "YTM mengasumsikan kupon dibayar sesuai jadwal dan diinvestasikan kembali pada tingkat yang sama.",
-    "Tarif pajak yang dipakai adalah 10%. Perhitungan belum memotong biaya lain (apabila ada).",
-    "Tidak berlaku untuk FR0088 dan FR0089 yang ditransaksikan pada 6-7 Januari 2021.",
-]
 
 CSS = """
 <style>
@@ -1519,16 +1271,11 @@ CSS = """
   .ko-big .v { font-family:ui-monospace,"DejaVu Sans Mono",Menlo,monospace;
                font-size:23px; font-weight:700; display:block; line-height:1.3; }
   .ko-big .s { font-size:12px; color:#5c7085; }
-  .ko-req label p { font-weight:600 !important; }
   div[data-testid="stForm"] { border-color:#dbe3ea; }
-
-  /* Streamlit renders each st.markdown as its own block; an opening <div> with
-     no text becomes an empty bordered box. Collapse those stray empties. */
   div[data-testid="stMarkdownContainer"]:empty { display:none; }
   .ko-card:empty { display:none; }
   .stDivider { margin:0.4rem 0; }
 
-  /* Force a solid white background on all fillable inputs to clearly indicate where to type */
   .stTextInput input, .stNumberInput input, .stDateInput input {
       background-color: #ffffff !important;
       color: #0f2233 !important;
@@ -1550,13 +1297,6 @@ CSS = """
 """
 
 
-def row(label, value, tone=None, indent=False, strong=False):
-    cls = "ko-row" + (" ko-ind" if indent else "") + (" ko-strong" if strong else "")
-    vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
-    st.markdown(f'<div class="{cls}"><span>{label}</span>'
-                f'<span class="{vcls}">{value}</span></div>', unsafe_allow_html=True)
-
-
 def _row_html(label, value, tone=None, indent=False, strong=False):
     cls = "ko-row" + (" ko-ind" if indent else "") + (" ko-strong" if strong else "")
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
@@ -1564,13 +1304,6 @@ def _row_html(label, value, tone=None, indent=False, strong=False):
 
 
 def card(heading, rows):
-    """
-    Render a whole card — heading + every row — in ONE markdown call, so the
-    styled border actually wraps its content instead of leaving an empty box
-    (a limitation of splitting the opening/closing <div> across st.markdown).
-    rows: list of (label, value, tone, indent, strong) tuples; tone/indent/
-    strong are optional per tuple.
-    """
     parts = []
     for r in rows:
         label = r[0]
@@ -1618,7 +1351,6 @@ def show_schedule(rows, currency, caption):
 
 
 def png_to_jpg(png_bytes, quality=92):
-    """Flatten PNG onto white and re-encode as JPEG (no alpha; iOS-friendly)."""
     from PIL import Image
     im = Image.open(io.BytesIO(png_bytes))
     if im.mode in ("RGBA", "LA", "P"):
@@ -1634,23 +1366,13 @@ def png_to_jpg(png_bytes, quality=92):
 
 
 def export_filename(sim_label, seri):
-    """SIMULASI BELI_FR0110_14-Aug-2026 — the naming convention the desk uses."""
     stamp = f"{dt.date.today():%d-%b-%Y}"
     safe = "".join(c for c in f"{sim_label}_{seri}_{stamp}" if c not in '\\/:*?"<>|')
     return f"{safe}.jpg"
 
 
 def export_section(png_factory, sim_label, seri, state_key):
-    """
-    Build-on-demand export. The heavy image is only rendered once the RM taps
-    the button, so the normal working view stays a single clean results panel
-    rather than the same simulation printed twice. After the first tap the
-    preview persists (session state) so re-runs from other inputs don't hide it.
-
-    png_factory: zero-arg callable returning PNG bytes.
-    """
     import base64
-
     made = st.session_state.get(state_key, False)
     label = "Perbarui gambar" if made else "Buat gambar untuk dibagikan"
     if st.button(label, key=f"{state_key}_btn", type="primary", **FULL_WIDTH):
@@ -1658,13 +1380,12 @@ def export_section(png_factory, sim_label, seri, state_key):
         st.session_state[state_key] = True
 
     if not made:
-        st.caption("Tekan tombol di atas untuk membuat gambar simulasi yang bisa "
-                   "diunduh atau dibagikan ke nasabah.")
+        st.caption("Tekan tombol di atas untuk membuat gambar simulasi yang bisa diunduh atau dibagikan ke nasabah.")
         return
 
     try:
         jpg = png_to_jpg(png_factory())
-    except Exception as exc:  # noqa: BLE001 - surfaced to the user
+    except Exception as exc:
         st.warning(f"Gambar tidak dapat dibuat: {exc}")
         return
 
@@ -1675,11 +1396,6 @@ def export_section(png_factory, sim_label, seri, state_key):
         'alt="Pratinjau simulasi" />',
         unsafe_allow_html=True,
     )
-    st.caption(
-        "📱 iPhone/iPad: tekan lama (long-press) gambar di atas, lalu pilih "
-        "**Save to Photos** untuk menyimpan sebagai JPG. "
-        "💻 Komputer: gunakan tombol unduh di bawah."
-    )
     st.download_button(
         "Unduh gambar (JPG)",
         data=jpg,
@@ -1689,33 +1405,21 @@ def export_section(png_factory, sim_label, seri, state_key):
     )
 
 
-# ===========================================================================
-# Tabs
-# ===========================================================================
 def tab_beli():
     left, right = st.columns([5, 6], gap="large")
-
     with left:
         st.markdown('<div class="ko-cap">Data produk</div>', unsafe_allow_html=True)
-        code = st.selectbox("Kode obligasi", PRODUCT_CODES,
-                            index=PRODUCT_CODES.index("FR0110"), key="b_code")
+        code = st.selectbox("Kode obligasi", PRODUCT_CODES, index=PRODUCT_CODES.index("FR0110"), key="b_code")
         meta = product_meta(code)
         show_meta(meta)
         market = st.selectbox("Jenis transaksi", ["Pasar Sekunder", "Pasar Perdana"], key="b_market")
-        txn = st.date_input("Tanggal transaksi", dt.date.today() - dt.timedelta(days=2),
-                            min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="b_txn",
-                            help="Tanggal order nasabah. Hanya ditampilkan pada gambar.")
-        settle = st.date_input("Tanggal setelmen", dt.date.today(),
-                               min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="b_settle",
-                               help="Tanggal setelmen inilah yang dipakai untuk menghitung "
-                                    "kupon berjalan, YTM, dan seluruh proyeksi.")
+        txn = st.date_input("Tanggal transaksi", dt.date.today() - dt.timedelta(days=2), key="b_txn")
+        settle = st.date_input("Tanggal setelmen", dt.date.today(), key="b_settle")
         nominal = parse_number(money_input("Nilai nominal", "200.000.000", "b_nominal", cur_hint="Rp"))
-        price_in = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05,
-                                   format="%.4f", key="b_price")
+        price_in = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05, format="%.4f", key="b_price")
 
     try:
-        r = simulate_beli(code, market, to_serial(settle), nominal,
-                          None if price_in is None else price_in / 100)
+        r = simulate_beli(code, market, to_serial(settle), nominal, None if price_in is None else price_in / 100)
     except SimError as exc:
         with right:
             st.info(str(exc))
@@ -1736,60 +1440,42 @@ def tab_beli():
         st.markdown('<div class="ko-cap">Proyeksi pendapatan (nett)</div>', unsafe_allow_html=True)
         a, b = st.columns(2)
         with a:
-            big("Total keuntungan", money(r["cumulative_nominal"], cur),
-                f"{pct(r['cumulative_percent'])} kumulatif atas modal",
-                tone_of(r["cumulative_nominal"]))
+            big("Total keuntungan", money(r["cumulative_nominal"], cur), f"{pct(r['cumulative_percent'])} kumulatif", tone_of(r["cumulative_nominal"]))
         with b:
-            big("Pengembalian hingga JT", money(r["proceeds_at_maturity"], cur),
-                f"{num(r['periods'])} periode · {num(r['months'])} bulan")
+            big("Pengembalian hingga JT", money(r["proceeds_at_maturity"], cur), f"{num(r['periods'])} periode")
         card(None, [
             ("Kupon diterima hingga JT", money(r["coupon_to_maturity"], cur)),
             ("Nominal diterima saat JT", money(r["received_at_maturity"], cur)),
             ("Pengembalian pokok", money(r["principal_back"], cur), None, True),
-            ("Kupon saat JT (gross)", money(r["final_coupon_gross"], cur), None, True),
             ("Capital gain / loss", money(r["capital_gain"], cur), tone_of(r["capital_gain"]), True),
             ("Total pajak", money(r["total_tax"], cur), None, True),
-            ("Pajak kupon", money(r["last_coupon_tax"], cur), None, True),
-            ("Pajak capital gain", money(r["capital_gain_tax"], cur), None, True),
         ])
 
-    # ---- schedule (full width, not collapsed) ----
     show_schedule(r["schedule"], cur, "Jadwal kupon")
-
-    # ---- export section, at the bottom ----
     st.divider()
     st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
     export_section(
-        lambda: render_beli_export(
-            r, code=code, market=market,
-            txn_serial=to_serial(txn), settle_serial=to_serial(settle),
-            nominal=nominal, price_pct=price_in, sim_title="SIMULASI BELI"),
+        lambda: render_beli_export(r, code=code, market=market, txn_serial=to_serial(txn),
+                                   settle_serial=to_serial(settle), nominal=nominal, price_pct=price_in),
         "SIMULASI BELI", code, "b_export")
 
 
 def tab_jual():
     left, right = st.columns([5, 6], gap="large")
-
     with left:
         st.markdown('<div class="ko-cap">Saat nasabah beli</div>', unsafe_allow_html=True)
-        code = st.selectbox("Kode obligasi", PRODUCT_CODES,
-                            index=PRODUCT_CODES.index("FR0110"), key="j_code")
+        code = st.selectbox("Kode obligasi", PRODUCT_CODES, index=PRODUCT_CODES.index("FR0110"), key="j_code")
         meta = product_meta(code)
         show_meta(meta)
-        buy_settle = st.date_input("Tanggal setelmen beli", dt.date.today() - dt.timedelta(days=365),
-                                   min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="j_bs")
+        buy_settle = st.date_input("Tanggal setelmen beli", dt.date.today() - dt.timedelta(days=365), key="j_bs")
         nominal = parse_number(money_input("Nilai nominal", "200.000.000", "j_nominal"))
-        buy_price = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05,
-                                    format="%.4f", key="j_bp")
+        buy_price = st.number_input("Harga nasabah beli (%)", value=100.61, step=0.05, format="%.4f", key="j_bp")
         st.markdown('<div class="ko-cap">Saat nasabah jual</div>', unsafe_allow_html=True)
-        sell_settle = st.date_input("Tanggal setelmen jual", dt.date.today(),
-                                    min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="j_ss")
-        sell_price = st.number_input("Harga nasabah jual (%)", value=99.00, step=0.05,
-                                     format="%.4f", key="j_sp")
+        sell_settle = st.date_input("Tanggal setelmen jual", dt.date.today(), key="j_ss")
+        sell_price = st.number_input("Harga nasabah jual (%)", value=99.00, step=0.05, format="%.4f", key="j_sp")
 
     try:
-        r = simulate_jual(code, to_serial(buy_settle), nominal, buy_price / 100,
-                          to_serial(sell_settle), sell_price / 100)
+        r = simulate_jual(code, to_serial(buy_settle), nominal, buy_price / 100, to_serial(sell_settle), sell_price / 100)
     except SimError as exc:
         with right:
             st.info(str(exc))
@@ -1808,71 +1494,39 @@ def tab_jual():
         st.markdown('<div class="ko-cap">Jika dijual sebelum jatuh tempo</div>', unsafe_allow_html=True)
         a, b = st.columns(2)
         with a:
-            big("Total keuntungan", money(r["gain_if_sold"], cur),
-                f"{pct(r['pct_if_sold'])} · {num(r['months_if_sold'])} bulan",
-                tone_of(r["gain_if_sold"]))
+            big("Total keuntungan", money(r["gain_if_sold"], cur), f"{pct(r['pct_if_sold'])}", tone_of(r["gain_if_sold"]))
         with b:
-            big("Pengembalian diterima", money(r["proceeds_if_sold"], cur),
-                f"imbal hasil {pct(r['ytm_sell'], 4)}")
-
-        st.markdown('<div class="ko-cap">Jika ditahan hingga jatuh tempo</div>', unsafe_allow_html=True)
-        c, d = st.columns(2)
-        with c:
-            big("Total keuntungan", money(r["gain_if_held"], cur),
-                f"{pct(r['pct_if_held'])} · {num(r['months_if_held'])} bulan",
-                tone_of(r["gain_if_held"]))
-        with d:
-            big("Pengembalian diterima", money(r["proceeds_if_held"], cur),
-                f"imbal hasil {pct(r['ytm_hold'], 4)}")
-
-        card(None, [
-            ("Jumlah indikatif dibayar saat beli", money(r["amount_paid"], cur)),
-            ("Total kupon telah diterima", money(r["coupon_to_sale"], cur)),
-            ("Total pajak saat jual", money(r["total_tax"], cur)),
-        ])
+            big("Pengembalian diterima", money(r["proceeds_if_sold"], cur), f"YTM {pct(r['ytm_sell'], 4)}")
 
     show_schedule(r["schedule"], cur, "Jadwal kupon hingga penjualan")
-
     st.divider()
     st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
     export_section(
-        lambda: render_jual_export(
-            r, code=code,
-            buy_txn=to_serial(buy_settle) - 2, buy_settle=to_serial(buy_settle),
-            nominal=nominal, buy_price=buy_price,
-            sell_txn=to_serial(sell_settle) - 2, sell_settle=to_serial(sell_settle),
-            sell_price=sell_price, sim_title="SIMULASI JUAL"),
+        lambda: render_jual_export(r, code=code, buy_txn=to_serial(buy_settle) - 2, buy_settle=to_serial(buy_settle),
+                                   nominal=nominal, buy_price=buy_price, sell_txn=to_serial(sell_settle) - 2,
+                                   sell_settle=to_serial(sell_settle), sell_price=sell_price),
         "SIMULASI JUAL", code, "j_export")
 
 
 def tab_switching():
     left, right = st.columns([5, 6], gap="large")
-
     with left:
         st.markdown('<div class="ko-cap">Produk 1 — beli</div>', unsafe_allow_html=True)
-        code1 = st.selectbox("Kode obligasi Produk 1", PRODUCT_CODES,
-                             index=PRODUCT_CODES.index("FR0110"), key="s_c1")
+        code1 = st.selectbox("Kode obligasi Produk 1", PRODUCT_CODES, index=PRODUCT_CODES.index("FR0110"), key="s_c1")
         show_meta(product_meta(code1))
-        bs1 = st.date_input("Setelmen beli Produk 1", dt.date.today() - dt.timedelta(days=365),
-                            min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_bs1")
+        bs1 = st.date_input("Setelmen beli Produk 1", dt.date.today() - dt.timedelta(days=365), key="s_bs1")
         nom1 = parse_number(money_input("Nilai nominal Produk 1", "200.000.000", "s_n1"))
         bp1 = st.number_input("Harga beli Produk 1 (%)", value=100.61, step=0.05, format="%.4f", key="s_bp1")
         st.markdown('<div class="ko-cap">Produk 1 — jual</div>', unsafe_allow_html=True)
-        ss1 = st.date_input("Setelmen jual Produk 1", dt.date.today(),
-                            min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_ss1")
+        ss1 = st.date_input("Setelmen jual Produk 1", dt.date.today(), key="s_ss1")
         sp1 = st.number_input("Harga jual Produk 1 (%)", value=99.00, step=0.05, format="%.4f", key="s_sp1")
 
         st.markdown('<div class="ko-cap">Produk 2 — beli</div>', unsafe_allow_html=True)
-        code2 = st.selectbox("Kode obligasi Produk 2", PRODUCT_CODES,
-                             index=PRODUCT_CODES.index("FR0100"), key="s_c2")
+        code2 = st.selectbox("Kode obligasi Produk 2", PRODUCT_CODES, index=PRODUCT_CODES.index("FR0100"), key="s_c2")
         meta2 = product_meta(code2)
         show_meta(meta2)
-        s2 = st.date_input("Setelmen Produk 2", dt.date.today(),
-                           min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_s2")
-        m2 = st.date_input("Jatuh tempo dipakai untuk Produk 2", to_date(meta2.maturity),
-                           min_value=dt.date(2000, 1, 1), max_value=dt.date(2100, 1, 1), key="s_m2",
-                           help="Boleh disamakan dengan jatuh tempo Produk 1 agar kedua pilihan "
-                                "dibandingkan dalam rentang waktu yang sama.")
+        s2 = st.date_input("Setelmen Produk 2", dt.date.today(), key="s_s2")
+        m2 = st.date_input("Jatuh tempo Produk 2", to_date(meta2.maturity), key="s_m2")
         nom2 = parse_number(money_input("Nilai nominal Produk 2", "200.000.000", "s_n2"))
         p2 = st.number_input("Harga beli Produk 2 (%)", value=99.50, step=0.05, format="%.4f", key="s_p2")
 
@@ -1885,56 +1539,24 @@ def tab_switching():
         return
 
     cur1 = r["p1"]["meta"].currency
-    cur2 = r["meta2"].currency
-
     with right:
         if r["currency_mismatch"]:
-            st.error(
-                f"Produk 1 ({cur1}) dan Produk 2 ({cur2}) berbeda mata uang. Simulasi switching "
-                "hanya berlaku untuk dua produk dengan mata uang yang sama — angka di bawah tidak "
-                "dapat dipakai. Ganti salah satu produk."
-            )
+            st.error("Perbedaan mata uang antara Produk 1 & 2.")
         st.markdown('<div class="ko-cap">Perbandingan dua pilihan</div>', unsafe_allow_html=True)
         a, b = st.columns(2)
         with a:
-            st.caption("Produk 1 ditahan hingga JT")
-            big("Total keuntungan", money(r["p1"]["gain_if_held"], cur1),
-                f"{pct(r['p1']['pct_if_held'])} · {num(r['p1']['months_if_held'])} bulan",
-                tone_of(r["p1"]["gain_if_held"]))
-            row("Pengembalian diterima", money(r["p1"]["proceeds_if_held"], cur1))
+            big("Ditahan hingga JT", money(r["p1"]["gain_if_held"], cur1), tone=tone_of(r["p1"]["gain_if_held"]))
         with b:
-            st.caption("Dialihkan ke Produk 2")
-            big("Total keuntungan", money(r["gain_switch"], cur1),
-                f"{pct(r['pct_switch'])} · {num(r['months_switched'])} bulan",
-                tone_of(r["gain_switch"]))
-            row("Pengembalian diterima", money(r["total_return_switch"], cur1))
+            big("Dialihkan ke Produk 2", money(r["gain_switch"], cur1), tone=tone_of(r["gain_switch"]))
 
-        card("Rincian peralihan", [
-            ("Modal awal (harga bersih Produk 1)", money(r["capital"], cur1)),
-            ("Hasil jual Produk 1 (nett)", money(r["proceeds_sell1"], cur1)),
-            ("Untung / rugi jual Produk 1", money(r["gain_sell1"], cur1), tone_of(r["gain_sell1"]), True),
-            ("Kupon s.d. jual Produk 1", money(r["coupon_until_sale1"], cur1), None, True),
-            ("Jumlah dibayar untuk Produk 2", money(r["paid2"], cur2)),
-            ("Kupon berjalan Produk 2", money(r["accrued2"], cur2), None, True),
-            ("Imbal hasil Produk 2 hingga JT", pct(r["ytm2"], 4), None, True),
-            ("Kupon Produk 2 s.d. JT", money(r["coupon_to_horizon2"], cur2), None, True),
-            ("Perlu top up sebesar" if r["top_up"] < 0 else "Kelebihan dikreditkan sebesar",
-             money(abs(r["top_up"]), cur1), None, False, True),
-        ])
-
-    show_schedule(r["schedule2"], cur2, "Jadwal kupon Produk 2")
-
+    show_schedule(r["schedule2"], r["meta2"].currency, "Jadwal kupon Produk 2")
     st.divider()
     st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
-    if r["currency_mismatch"]:
-        st.caption("Gambar tidak dibuat karena kedua produk berbeda mata uang.")
-    else:
+    if not r["currency_mismatch"]:
         export_section(
-            lambda: render_switching_export(
-                r, code1=code1, bs1=to_serial(bs1), ss1=to_serial(ss1),
-                nom1=nom1, bp1=bp1, sp1=sp1,
-                code2=code2, s2=to_serial(s2), m2=to_serial(m2),
-                nom2=nom2, p2=p2, sim_title="SIMULASI SWITCHING"),
+            lambda: render_switching_export(r, code1=code1, bs1=to_serial(bs1), ss1=to_serial(ss1),
+                                            nom1=nom1, bp1=bp1, sp1=sp1, code2=code2, s2=to_serial(s2),
+                                            m2=to_serial(m2), nom2=nom2, p2=p2),
             "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
 
 
@@ -1943,54 +1565,34 @@ def tab_kredit():
     left, right = st.columns(2, gap="large")
 
     def _apply_ltv_logic(idx, default_code=None):
-        """Callback to recalculate default LTV when product changes."""
         code = st.session_state.get(f"k_prod_{idx}", default_code)
         if not code:
             return
-        
         meta = product_meta(code)
         months_to_mat = datedif_m(to_serial(dt.date.today()), meta.maturity)
         years = months_to_mat / 12.0
-        
         if meta.currency == "IDR":
-            if years < 5.0:
-                val = 90.0
-            elif years <= 10.0:
-                val = 85.0
-            else:
-                val = 80.0
-        else: # USD
-            if years <= 10.0:
-                val = 80.0
-            else:
-                val = 70.0
-                
-        # Push to session_state so the widget adopts the new pre-filled value
+            val = 90.0 if years < 5.0 else (85.0 if years <= 10.0 else 80.0)
+        else:
+            val = 80.0 if years <= 10.0 else 70.0
         st.session_state[f"k_ltv_{idx}"] = val
 
     def render_kredit_col(idx, def_nom, def_prod, def_tenor):
         st.markdown(f'<div class="ko-cap" style="margin-top:0px;">Opsi {idx}</div>', unsafe_allow_html=True)
-        
-        # Ensure LTV is pre-filled on first load before the widget binds to it
         if f"k_ltv_{idx}" not in st.session_state:
             _apply_ltv_logic(idx, default_code=def_prod)
 
-        # User Inputs
         nom_raw = money_input("Nominal Investasi", def_nom, f"k_nom_{idx}", cur_hint="")
         nom = parse_number(nom_raw) or 0.0
         
-        # Bind the product dropdown to the callback
         code = st.selectbox("Produk", PRODUCT_CODES, index=PRODUCT_CODES.index(def_prod), 
                             key=f"k_prod_{idx}", on_change=_apply_ltv_logic, args=(idx,))
         meta = product_meta(code)
         show_meta(meta)
-        
         cur = meta.currency
         
         colA, colB = st.columns(2)
         with colA:
-            # We explicitly omit the `value=` parameter here so the widget fully 
-            # trusts the `session_state`, honoring both callback updates and manual edits.
             ltv = st.number_input("LTV (%)", step=1.0, format="%.1f", key=f"k_ltv_{idx}") / 100.0
             bunga_kredit = st.number_input("Suku Bunga Kredit (% p.a)", value=7.18, step=0.1, format="%.2f", key=f"k_bk_{idx}") / 100.0
         with colB:
@@ -2000,74 +1602,66 @@ def tab_kredit():
         
         tenor = st.number_input("Tenor Pinjaman (Tahun)", value=def_tenor, step=1, key=f"k_tenor_{idx}")
         
-        # Main Calculations
         plafon = nom * ltv
         prov_nom = plafon * prov_pct
         tot_biaya = prov_nom + admin
         
         inv_gross = nom * meta.coupon
         inv_nett = inv_gross * (1 - TAX)
-        inv_bulan = inv_nett / 12
-        inv_hari = inv_nett / 360 
         
         pinj_tahun = plafon * bunga_kredit
-        pinj_bulan = pinj_tahun / 12
-        pinj_hari = pinj_tahun / 360
         
         if tenor > 0:
             n = int(tenor * 12)
             if bunga_kredit > 0:
-                r = bunga_kredit / 12
-                pmt = (plafon * r * math.pow(1+r, n)) / (math.pow(1+r, n) - 1)
-                tot_bunga = (pmt * n) - plafon
+                r_rate = bunga_kredit / 12
+                pmt = (plafon * r_rate * math.pow(1+r_rate, n)) / (math.pow(1+r_rate, n) - 1)
             else:
                 pmt = plafon / n
-                tot_bunga = 0
         else:
             pmt = 0
-            tot_bunga = 0
             
         st.markdown('<div class="ko-cap" style="margin-top:16px;">Ringkasan Parameter</div>', unsafe_allow_html=True)
         card(None, [
             ("Kupon Produk", pct(meta.coupon, 3)),
-            ("Periode Bunga", "Setiap Bulan" if meta.freq_months == 1 else "Setiap 6 Bulan"),
             ("Plafon Kredit", money(plafon, cur, decimals=0), None, False, True),
-            ("Provisi", money(prov_nom, cur, decimals=0)),
-            ("Admin", money(admin, cur, decimals=0)),
-            ("Total Biaya", money(tot_biaya, cur, decimals=0), "loss", False, True)
+            ("Total Biaya (Provisi + Admin)", money(tot_biaya, cur, decimals=0), "loss", False, True)
         ])
         
-        st.markdown('<div class="ko-cap">Simulasi Bunga Investasi</div>', unsafe_allow_html=True)
+        st.markdown('<div class="ko-cap">Simulasi Pendapatan & Beban</div>', unsafe_allow_html=True)
         card(None, [
-            ("Bunga Investasi / Tahun (Gross)", money(inv_gross, cur, decimals=0)),
             ("Bunga Investasi / Tahun (Nett)", money(inv_nett, cur, decimals=0), "gain", False, True),
-            ("Bunga Investasi / Bulan (eqv)", money(inv_bulan, cur, decimals=0)),
-            ("Bunga Investasi / Hari (eqv)", money(inv_hari, cur, decimals=0), "gain", False, True)
+            ("Bunga Pinjaman / Tahun (Maksimal)", money(pinj_tahun, cur, decimals=0)),
+            ("Cicilan / Bulan (Metode Anuitas - IL)", money(pmt, cur, decimals=0), "loss", False, True)
         ])
         
-        st.markdown('<div class="ko-cap">Simulasi Pinjaman (KL atau RK) — Asumsi Maksimal</div>', unsafe_allow_html=True)
-        card(None, [
-            ("Bunga Pinjaman / Tahun", money(pinj_tahun, cur, decimals=0)),
-            ("Bunga Pinjaman / Bulan", money(pinj_bulan, cur, decimals=0)),
-            ("Bunga Pinjaman / Hari", money(pinj_hari, cur, decimals=0), "loss", False, True)
-        ])
-        
-        st.markdown('<div class="ko-cap">Simulasi Pinjaman (IL)</div>', unsafe_allow_html=True)
-        card(None, [
-            ("Total Bunga Pinjaman", money(tot_bunga, cur, decimals=0)),
-            ("Cicilan / Bulan", money(pmt, cur, decimals=0), "loss", False, True)
-        ])
-        st.markdown('<div style="color:#b4342a; font-size:11px; font-weight:600; font-style:italic; margin-top:-6px;">*Perhitungan bunga IL menggunakan perhitungan anuitas</div>', unsafe_allow_html=True)
-        
+        # Build dictionary for image rendering
+        export_data = {
+            "code": code,
+            "currency": cur,
+            "nominal_fmt": money(nom, cur, decimals=0),
+            "ltv": ltv,
+            "plafon_fmt": money(plafon, cur, decimals=0),
+            "bunga_kredit": bunga_kredit,
+            "tenor": tenor,
+            "inv_nett_fmt": money(inv_nett, cur, decimals=0),
+            "pinj_tahun_fmt": money(pinj_tahun, cur, decimals=0),
+            "pmt_fmt": money(pmt, cur, decimals=0),
+            "tot_biaya_fmt": money(tot_biaya, cur, decimals=0),
+        }
+
+        st.divider()
+        st.markdown(f'<div class="ko-cap">Unduh Gambar Opsi {idx}</div>', unsafe_allow_html=True)
+        export_section(
+            lambda: render_kredit_export(f"Opsi {idx}", export_data),
+            f"SIMULASI_KREDIT_OPSI_{idx}", code, f"k_export_{idx}")
+
     with left:
         render_kredit_col(1, "300,000", "INDOIS30NEWNEW", 3)
     with right:
         render_kredit_col(2, "5,000,000,000", "FR0082", 3)
 
 
-# ===========================================================================
-# Entry point
-# ===========================================================================
 def main():
     st.set_page_config(page_title="Kalkulator Obligasi", page_icon="🧮",
                        layout="wide", initial_sidebar_state="collapsed")
@@ -2090,10 +1684,6 @@ def main():
         tab_switching()
     with kredit:
         tab_kredit()
-
-    with st.expander("Disclaimer"):
-        for text in DISCLAIMER:
-            st.markdown(f"- {text}")
 
 
 if __name__ == "__main__":
