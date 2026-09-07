@@ -15,6 +15,7 @@ import datetime as dt
 import io
 import json
 import math
+import textwrap
 from dataclasses import dataclass
 
 import streamlit as st
@@ -827,7 +828,19 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
 # Simple & Easy-to-Understand Export for Simulasi Kredit (Opsi 1 / Opsi 2)
 # ---------------------------------------------------------------------------
 def render_kredit_export(opt_title, data_dict):
-    W, H = 8.5, 9.2
+    W = 8.5
+    ML, MR = 0.55, 0.55
+    usable_w = W - ML - MR
+
+    # Pre-calculate wrapped disclaimer lines to determine height dynamically
+    wrapped_lines = []
+    wrapped_lines.append("DISCLAIMER:")
+    for line in DISCLAIMER_FULL:
+        wrapped_lines.extend(textwrap.wrap(line, width=95))
+
+    disc_h = 0.28 + len(wrapped_lines) * 0.185 + 0.15
+    H = 5.2 + disc_h
+    
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
     ax = fig.add_axes([0, 0, 1, 1])
@@ -835,32 +848,31 @@ def render_kredit_export(opt_title, data_dict):
     ax.set_ylim(0, H)
     ax.axis("off")
 
-    ML, MR = 0.6, 0.6
-    top = H - 0.5
+    top = H - 0.45
 
     def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center"):
         ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=SANS)
 
-    ax.text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", fontsize=15, color=INK, weight="bold", family=SANS, va="top")
-    ax.text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", fontsize=9, color=MUTED, family=MONO, ha="right", va="top")
-    top -= 0.4
+    ax.text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", fontsize=14, color=INK, weight="bold", family=SANS, va="top")
+    ax.text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", fontsize=8.5, color=MUTED, family=MONO, ha="right", va="top")
+    top -= 0.35
     ax.plot([ML, W - MR], [top, top], color=INK, lw=1.5)
-    top -= 0.4
+    top -= 0.35
 
     def section_header(title, y_pos):
-        ax.add_patch(plt.Rectangle((ML, y_pos - 0.3), W - ML - MR, 0.3, facecolor=_EX_BLACK, edgecolor="none"))
-        ax.text(ML + 0.15, y_pos - 0.15, title, fontsize=10, color="white", weight="bold", va="center", family=SANS)
-        return y_pos - 0.45
+        ax.add_patch(plt.Rectangle((ML, y_pos - 0.28), usable_w, 0.28, facecolor=_EX_BLACK, edgecolor="none"))
+        ax.text(ML + 0.12, y_pos - 0.14, title, fontsize=9.5, color="white", weight="bold", va="center", family=SANS)
+        return y_pos - 0.42
 
     def add_rows(rows, y_pos):
-        rh = 0.3
+        rh = 0.28
         for lab, val, bold in rows:
             ry = y_pos - rh
-            ax.add_patch(plt.Rectangle((ML, ry), W - ML - MR, rh, facecolor="#f9fbfe", edgecolor=_EX_LINE, lw=0.6))
-            text(ML + 0.15, ry + rh/2, lab, size=9, weight="bold" if bold else "normal")
-            text(W - MR - 0.15, ry + rh/2, val, size=9, weight="bold" if bold else "normal", ha="right")
+            ax.add_patch(plt.Rectangle((ML, ry), usable_w, rh, facecolor="#f9fbfe", edgecolor=_EX_LINE, lw=0.6))
+            text(ML + 0.12, ry + rh/2, lab, size=8.5, weight="bold" if bold else "normal")
+            text(W - MR - 0.12, ry + rh/2, val, size=8.5, weight="bold" if bold else "normal", ha="right", family=MONO)
             y_pos = ry
-        return y_pos - 0.15
+        return y_pos - 0.12
 
     top = section_header("1. PARAMETER KREDIT & INVESTASI", top)
     top = add_rows([
@@ -880,14 +892,20 @@ def render_kredit_export(opt_title, data_dict):
         ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False),
     ], top)
 
-    disc_top = 1.4
-    ax.add_patch(plt.Rectangle((ML, 0.4), W - ML - MR, disc_top, facecolor="white", edgecolor=INK, lw=0.8))
-    dy = 0.4 + disc_top - 0.2
-    text(ML + 0.15, dy, "DISCLAIMER:", size=8, weight="bold")
-    dy -= 0.22
+    # Disclaimer Box with correct margins and height
+    box_bottom = 0.35
+    box_top = box_bottom + disc_h
+    ax.add_patch(plt.Rectangle((ML, box_bottom), usable_w, disc_h, facecolor="white", edgecolor=INK, lw=0.8))
+    
+    dy = box_top - 0.20
+    text(ML + 0.15, dy, "DISCLAIMER:", size=7.5, weight="bold")
+    dy -= 0.19
     for line in DISCLAIMER_FULL:
-        text(ML + 0.25, dy, f"• {line}", size=6.2, color=MUTED)
-        dy -= 0.20
+        wrapped = textwrap.wrap(line, width=95)
+        for i, w_line in enumerate(wrapped):
+            prefix = "• " if i == 0 else "   "
+            text(ML + 0.20, dy, prefix + w_line, size=6.0, color=MUTED)
+            dy -= 0.175
 
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
@@ -983,7 +1001,7 @@ class _Sheet:
                 cy = one(cy, n, date, amt)
             self.ax.plot([x, x + w], [cy, cy], color=_EX_HAIR, lw=0.6)
             for gx in (0.12, 0.60, 0.90):
-                self.ax.text(x + w * gx, cy - 0.16, fontsize=9,
+                self.ax.text(x + w * gx, cy - 0.16, "\u22ee", fontsize=9,
                              ha="center", va="center", color=MUTED)
             cy -= 0.31
             last = sched[-1]
