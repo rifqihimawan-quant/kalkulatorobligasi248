@@ -1528,19 +1528,24 @@ CSS = """
   .ko-card:empty { display:none; }
   .stDivider { margin:0.4rem 0; }
 
-  /* Dropdowns: white text on a dark control so the selection reads clearly on
-     mobile. Scoped to the CLOSED select box only — the open option list below
-     stays dark-on-white so it never becomes white-on-white. */
-  div[data-baseweb="select"] > div {
-    background:#0f2233 !important;
-    border-color:#0f2233 !important;
+  /* Force a solid white background on all fillable inputs to clearly indicate where to type */
+  .stTextInput input, .stNumberInput input, .stDateInput input {
+      background-color: #ffffff !important;
+      color: #0f2233 !important;
   }
-  div[data-baseweb="select"] > div * { color:#ffffff !important; }
-  div[data-baseweb="select"] svg { fill:#ffffff !important; color:#ffffff !important; }
-  div[data-baseweb="select"] input { color:#ffffff !important; caret-color:#ffffff; }
-  /* the popover menu of options keeps dark text on a white background */
-  ul[data-baseweb="menu"] li { color:#0f2233 !important; }
-  ul[data-baseweb="menu"] { background:#ffffff !important; }
+  div[data-baseweb="select"] > div {
+      background-color: #ffffff !important;
+      border-color: #dbe3ea !important;
+  }
+  div[data-baseweb="select"] > div * {
+      color: #0f2233 !important;
+  }
+  div[data-baseweb="select"] svg {
+      fill: #0f2233 !important;
+  }
+  div[data-baseweb="input"], div[data-baseweb="base-input"] {
+      background-color: #ffffff !important;
+  }
 </style>
 """
 
@@ -1940,7 +1945,7 @@ def tab_kredit():
     def render_kredit_col(idx, def_nom, def_prod, def_tenor):
         st.markdown(f'<div class="ko-cap" style="margin-top:0px;">Opsi {idx}</div>', unsafe_allow_html=True)
         
-        # User Inputs (Yellow mapped counterparts)
+        # User Inputs
         nom_raw = money_input("Nominal Investasi", def_nom, f"k_nom_{idx}", cur_hint="")
         nom = parse_number(nom_raw) or 0.0
         
@@ -1949,7 +1954,23 @@ def tab_kredit():
         show_meta(meta)
         
         cur = meta.currency
-        ltv_def = 90.0 if cur == "IDR" else 80.0
+        
+        # Dynamic Default LTV calculation
+        months_to_mat = datedif_m(to_serial(dt.date.today()), meta.maturity)
+        years_to_mat = months_to_mat / 12.0
+        
+        if cur == "IDR":
+            if years_to_mat < 5.0:
+                ltv_def = 90.0
+            elif years_to_mat <= 10.0:
+                ltv_def = 85.0
+            else:
+                ltv_def = 80.0
+        else: # USD
+            if years_to_mat <= 10.0:
+                ltv_def = 80.0
+            else:
+                ltv_def = 70.0
         
         colA, colB = st.columns(2)
         with colA:
@@ -1991,7 +2012,6 @@ def tab_kredit():
             pmt = 0
             tot_bunga = 0
             
-        # Passing decimals=0 forces the display format to match the Excel screenshot strictly.
         st.markdown('<div class="ko-cap" style="margin-top:16px;">Ringkasan Parameter</div>', unsafe_allow_html=True)
         card(None, [
             ("Kupon Produk", pct(meta.coupon, 3)),
