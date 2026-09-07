@@ -752,7 +752,6 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
     ML, MR, MT = 0.35, 0.35, 0.30
     gutter = 0.45
     col_w = (W - ML - MR - gutter) / 2
-    rcol_x = ML + col_w + gutter
     top = H - MT
 
     def text(x, y, s, size=9, color=INK, weight="normal", ha="left", va="center", family=SANS):
@@ -832,7 +831,6 @@ def render_kredit_export(opt_title, data_dict):
     ML, MR = 0.55, 0.55
     usable_w = W - ML - MR
 
-    # Pre-calculate wrapped disclaimer lines to determine height dynamically
     wrapped_lines = []
     wrapped_lines.append("DISCLAIMER:")
     for line in DISCLAIMER_FULL:
@@ -850,18 +848,18 @@ def render_kredit_export(opt_title, data_dict):
 
     top = H - 0.45
 
-    def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center"):
-        ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=SANS)
+    def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center", family=SANS):
+        ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=family)
 
-    ax.text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", fontsize=14, color=INK, weight="bold", family=SANS, va="top")
-    ax.text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", fontsize=8.5, color=MUTED, family=MONO, ha="right", va="top")
+    text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", size=14, weight="bold", va="top")
+    text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", size=8.5, color=MUTED, ha="right", va="top", family=MONO)
     top -= 0.35
     ax.plot([ML, W - MR], [top, top], color=INK, lw=1.5)
     top -= 0.35
 
     def section_header(title, y_pos):
         ax.add_patch(plt.Rectangle((ML, y_pos - 0.28), usable_w, 0.28, facecolor=_EX_BLACK, edgecolor="none"))
-        ax.text(ML + 0.12, y_pos - 0.14, title, fontsize=9.5, color="white", weight="bold", va="center", family=SANS)
+        text(ML + 0.12, y_pos - 0.14, title, size=9.5, color="white", weight="bold")
         return y_pos - 0.42
 
     def add_rows(rows, y_pos):
@@ -892,7 +890,6 @@ def render_kredit_export(opt_title, data_dict):
         ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False),
     ], top)
 
-    # Disclaimer Box with correct margins and height
     box_bottom = 0.35
     box_top = box_bottom + disc_h
     ax.add_patch(plt.Rectangle((ML, box_bottom), usable_w, disc_h, facecolor="white", edgecolor=INK, lw=0.8))
@@ -1330,7 +1327,7 @@ def big(label, value, sub="", tone=None):
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     st.markdown(f'<div class="ko-big"><span class="l">{label}</span>'
                 f'<span class="{vcls}">{value}</span>'
-                f'<span class="s">{sub}</span></div>', unsafe_allow_html=True)
+                f'<span class="{sub}</span></div>', unsafe_allow_html=True)
 
 
 def tone_of(value):
