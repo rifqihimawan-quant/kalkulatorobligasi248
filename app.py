@@ -785,22 +785,28 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
 # Simple & Easy-to-Understand Export for Simulasi Kredit (Opsi 1 / Opsi 2)
 # ---------------------------------------------------------------------------
 def render_kredit_export(opt_title, data_dict):
-    W = 9.5  # Increased width for larger readability
+    W = 9.5  # Width for readability
     ML, MR = 0.55, 0.55
     usable_w = W - ML - MR
 
-    # Calculate optimal disclaimer textwrapping to guarantee size constraint
+    # Calculate disclaimer lines and compact height (< 15% of total page length)
     wrapped_lines = []
     wrapped_lines.append("DISCLAIMER:")
     for line in DISCLAIMER_FULL:
         wrapped_lines.extend(textwrap.wrap(line, width=130))
 
-    disc_h = 0.30 + len(wrapped_lines) * 0.16 + 0.15
+    disc_h = 0.25 + len(wrapped_lines) * 0.15 + 0.10
     
-    # Calculate H dynamically ensuring the disclaimer is firmly less than 1/4th the total height
-    H_main = 0.8 + 2.7 + 3.46 + 0.45  # Estimated height for title and 2 sections
-    H = H_main + disc_h
-    
+    # Height components dynamically calculated
+    top_margin = 0.45
+    title_block = 1.1
+    sec1_h = 0.46 + 6 * 0.38 + 0.15
+    sec2_h = 0.46 + 8 * 0.38 + 0.15
+    gap_before_disc = 0.30
+    bottom_margin = 0.35
+
+    H = top_margin + title_block + sec1_h + sec2_h + gap_before_disc + disc_h + bottom_margin
+
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
     ax = fig.add_axes([0, 0, 1, 1])
@@ -808,7 +814,7 @@ def render_kredit_export(opt_title, data_dict):
     ax.set_ylim(0, H)
     ax.axis("off")
 
-    top = H - 0.45
+    top = H - top_margin
 
     def text(x, y, s, size=10.5, color=INK, weight="normal", ha="left", va="center", family=SANS):
         ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=family)
@@ -825,7 +831,7 @@ def render_kredit_export(opt_title, data_dict):
         return y_pos - 0.46
 
     def add_rows(rows, y_pos):
-        rh = 0.38 # Taller rows for readability
+        rh = 0.38
         for row in rows:
             lab = row[0]
             val = row[1]
@@ -862,19 +868,21 @@ def render_kredit_export(opt_title, data_dict):
         ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False, INK),
     ], top)
 
-    box_bottom = 0.35
-    box_top = box_bottom + disc_h
+    # Position disclaimer box cleanly below Section 2 with gap
+    top -= gap_before_disc
+    box_top = top
+    box_bottom = box_top - disc_h
     ax.add_patch(plt.Rectangle((ML, box_bottom), usable_w, disc_h, facecolor="white", edgecolor=INK, lw=0.8))
     
-    dy = box_top - 0.22
-    text(ML + 0.15, dy, "DISCLAIMER:", size=8.5, weight="bold")
-    dy -= 0.22
+    dy = box_top - 0.18
+    text(ML + 0.15, dy, "DISCLAIMER:", size=8.0, weight="bold")
+    dy -= 0.18
     for line in DISCLAIMER_FULL:
         wrapped = textwrap.wrap(line, width=130)
         for i, w_line in enumerate(wrapped):
             prefix = "• " if i == 0 else "   "
-            text(ML + 0.20, dy, prefix + w_line, size=7.0, color=MUTED)
-            dy -= 0.16
+            text(ML + 0.20, dy, prefix + w_line, size=6.5, color=MUTED)
+            dy -= 0.15
 
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
@@ -977,6 +985,7 @@ class _Sheet:
             cy = one(cy, last[0], last[1], last[2])
         return cy
 
+
 def _new_figure(sim_title, W, H):
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
@@ -995,6 +1004,7 @@ def _new_figure(sim_title, W, H):
             color=INK, lw=1.6)
     return fig, ax, top - title_h - 0.14
 
+
 def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
     lines = lines if lines is not None else DISCLAIMER_FULL
     box_top = top if top is not None else (0.28 + disc_h)
@@ -1009,6 +1019,7 @@ def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
         ax.text(ML + 0.16, dy, "\u25cf", fontsize=6, color=INK, va="center")
         ax.text(ML + 0.34, dy, line, fontsize=6.4, color=INK, family=SANS, va="center")
         dy -= 0.208
+
 
 def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
                        sell_txn, sell_settle, sell_price, sim_title="SIMULASI JUAL"):
@@ -1098,6 +1109,7 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     FigureCanvasAgg(fig).print_png(buf)
     plt.close(fig)
     return buf.getvalue()
+
 
 def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
                             code2, s2, m2, nom2, p2, sim_title="SIMULASI SWITCHING"):
@@ -1217,6 +1229,7 @@ def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
     plt.close(fig)
     return buf.getvalue()
 
+
 CSS = """
 <style>
   .stApp { background: #eef2f5; }
@@ -1272,10 +1285,12 @@ CSS = """
 </style>
 """
 
+
 def _row_html(label, value, tone=None, indent=False, strong=False):
     cls = "ko-row" + (" ko-ind" if indent else "") + (" ko-strong" if strong else "")
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     return f'<div class="{cls}"><span>{label}</span><span class="{vcls}">{value}</span></div>'
+
 
 def card(heading, rows):
     parts = []
@@ -1289,14 +1304,17 @@ def card(heading, rows):
     head = f'<div class="ko-cap" style="margin-bottom:6px">{heading}</div>' if heading else ""
     st.markdown(f'<div class="ko-card">{head}{"".join(parts)}</div>', unsafe_allow_html=True)
 
+
 def big(label, value, sub="", tone=None):
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     st.markdown(f'<div class="ko-big"><span class="l">{label}</span>'
                 f'<span class="{vcls}">{value}</span>'
                 f'<span class="{sub}</span></div>', unsafe_allow_html=True)
 
+
 def tone_of(value):
     return "gain" if value >= 0 else "loss"
+
 
 def show_meta(meta: Meta):
     st.caption(
@@ -1304,6 +1322,7 @@ def show_meta(meta: Meta):
         f"{'bulanan' if meta.frequency == 'Monthly' else 'semesteran'} · "
         f"jatuh tempo {fmt_date(meta.maturity)}"
     )
+
 
 def show_schedule(rows, currency, caption):
     st.markdown(f'<div class="ko-cap">{caption}'
@@ -1319,6 +1338,7 @@ def show_schedule(rows, currency, caption):
         hide_index=True, height=min(38 + len(rows) * 35, 460), **FULL_WIDTH,
     )
 
+
 def png_to_jpg(png_bytes, quality=92):
     from PIL import Image
     im = Image.open(io.BytesIO(png_bytes))
@@ -1333,10 +1353,12 @@ def png_to_jpg(png_bytes, quality=92):
     im.save(out, format="JPEG", quality=quality, subsampling=0, optimize=True)
     return out.getvalue()
 
+
 def export_filename(sim_label, seri):
     stamp = f"{dt.date.today():%d-%b-%Y}"
     safe = "".join(c for c in f"{sim_label}_{seri}_{stamp}" if c not in '\\/:*?"<>|')
     return f"{safe}.jpg"
+
 
 def export_section(png_factory, sim_label, seri, state_key):
     import base64
@@ -1370,6 +1392,7 @@ def export_section(png_factory, sim_label, seri, state_key):
         mime="image/jpeg",
         **FULL_WIDTH,
     )
+
 
 def tab_beli():
     left, right = st.columns([5, 6], gap="large")
@@ -1425,6 +1448,7 @@ def tab_beli():
                                    settle_serial=to_serial(settle), nominal=nominal, price_pct=price_in),
         "SIMULASI BELI", code, "b_export")
 
+
 def tab_jual():
     left, right = st.columns([5, 6], gap="large")
     with left:
@@ -1471,6 +1495,7 @@ def tab_jual():
                                    nominal=nominal, buy_price=buy_price, sell_txn=to_serial(sell_settle) - 2,
                                    sell_settle=to_serial(sell_settle), sell_price=sell_price),
         "SIMULASI JUAL", code, "j_export")
+
 
 def tab_switching():
     left, right = st.columns([5, 6], gap="large")
@@ -1522,6 +1547,7 @@ def tab_switching():
                                             nom1=nom1, bp1=bp1, sp1=sp1, code2=code2, s2=to_serial(s2),
                                             m2=to_serial(m2), nom2=nom2, p2=p2),
             "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
+
 
 def tab_kredit():
     st.markdown('<div class="ko-cap" style="margin-bottom:12px;">Simulasi Kredit Agunan Obligasi</div>', unsafe_allow_html=True)
