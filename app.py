@@ -886,7 +886,7 @@ def render_kredit_export(opt_title, data_dict):
         ("LTV (%)", f"{data_dict['ltv']*100:.1f}%", False),
         ("Plafon Kredit", data_dict["plafon_fmt"], True),
         ("Suku Bunga Kredit (% p.a)", f"{data_dict['bunga_kredit']*100:.2f}%", False),
-        ("Tenor Pinjaman Angsuran", f"{data_dict['tenor']} Tahun", False),
+        ("Tenor Pinjaman", f"{data_dict['tenor']} Tahun", False),
     ], top)
 
     top = section_header("2. ESTIMASI PENDAPATAN & BEBAN", top)
