@@ -23,6 +23,7 @@ import matplotlib
 matplotlib.use("Agg")
 import matplotlib.pyplot as plt
 from matplotlib.backends.backend_agg import FigureCanvasAgg
+from matplotlib.patches import FancyBboxPatch
 
 # ---------------------------------------------------------------------------
 # Product master table — C333:R497 of "Simulasi Beli".
@@ -36,16 +37,22 @@ EPOCH = dt.date(1899, 12, 30)
 MONTHS_ID = ["Januari", "Februari", "Maret", "April", "Mei", "Juni",
              "Juli", "Agustus", "September", "Oktober", "November", "Desember"]
 
+INK = "#0f2233"
+MUTED = "#5c7085"
+LINE = "#dbe3ea"
+ACCENT = "#0e7c6b"
+LOSS = "#b4342a"
+MARKER = "#ffd400"
+SANS = "DejaVu Sans"
+MONO = "DejaVu Sans Mono"
 
 def to_serial(d) -> int:
     if isinstance(d, (int, float)):
         return int(d)
     return (d - EPOCH).days
 
-
 def to_date(serial) -> dt.date:
     return EPOCH + dt.timedelta(days=int(serial))
-
 
 def fmt_date(serial) -> str:
     if serial is None:
@@ -53,14 +60,11 @@ def fmt_date(serial) -> str:
     d = to_date(serial)
     return f"{d.day:02d} {MONTHS_ID[d.month - 1]} {d.year}"
 
-
 def fmt_date_short(serial) -> str:
     d = to_date(serial)
     return f"{d.day:02d} {MONTHS_ID[d.month - 1][:3]} {d.year}"
 
-
 _MON_EN = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"]
-
 
 def fmt_date_en(serial) -> str:
     if serial is None:
@@ -68,11 +72,9 @@ def fmt_date_en(serial) -> str:
     d = to_date(serial)
     return f"{d.day:02d}-{_MON_EN[d.month - 1]}-{str(d.year)[2:]}"
 
-
 def _days_in_month(y: int, m: int) -> int:
     leap = (y % 4 == 0 and y % 100 != 0) or y % 400 == 0
     return [31, 29 if leap else 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31][m - 1]
-
 
 def edate(serial, months: int) -> int:
     d = to_date(serial)
@@ -80,11 +82,9 @@ def edate(serial, months: int) -> int:
     y, m = total // 12, total % 12 + 1
     return to_serial(dt.date(y, m, min(d.day, _days_in_month(y, m))))
 
-
 def xdate(y: int, m: int, day: int) -> int:
     y2, m2 = y + (m - 1) // 12, (m - 1) % 12 + 1
     return to_serial(dt.date(y2, m2, 1)) + (day - 1)
-
 
 def datedif_m(a, b) -> int:
     if b < a:
@@ -95,13 +95,11 @@ def datedif_m(a, b) -> int:
         n -= 1
     return n
 
-
 def days360_eu(a, b) -> int:
     da, db = to_date(a), to_date(b)
     d1 = 30 if da.day == 31 else da.day
     d2 = 30 if db.day == 31 else db.day
     return (db.year - da.year) * 360 + (db.month - da.month) * 30 + (d2 - d1)
-
 
 def days360_us(a, b) -> int:
     da, db = to_date(a), to_date(b)
@@ -112,23 +110,19 @@ def days360_us(a, b) -> int:
         d2 = 30
     return (db.year - da.year) * 360 + (db.month - da.month) * 30 + (d2 - d1)
 
-
 def trunc(x, digits: int = 0):
     f = 10 ** digits
     return math.trunc(x * f) / f
-
 
 def xround(x, digits: int = 0):
     f = 10 ** digits
     v = x * f
     return (-math.floor(-v + 0.5) if v < 0 else math.floor(v + 0.5)) / f
 
-
 def bbg_round(x):
     if x == 0:
         return 0.0
     return float(math.ceil(x)) if (x - math.trunc(x)) > 0.5 else float(math.floor(x))
-
 
 def _coupon_dates(settle, maturity, freq):
     step = 12 // freq
@@ -139,7 +133,6 @@ def _coupon_dates(settle, maturity, freq):
         guard += 1
     return d, (nxt if nxt is not None else edate(d, step))
 
-
 def _coup_num(settle, maturity, freq) -> int:
     step, d, n, guard = 12 // freq, maturity, 0, 0
     while d > settle and guard < 2000:
@@ -147,7 +140,6 @@ def _coup_num(settle, maturity, freq) -> int:
         d = edate(d, -step)
         guard += 1
     return n
-
 
 def price(settle, maturity, rate, yld, redemption, freq, basis):
     pcd, ncd = _coupon_dates(settle, maturity, freq)
@@ -167,7 +159,6 @@ def price(settle, maturity, rate, yld, redemption, freq, basis):
         p += cpn / y ** (k - 1 + dsc / e)
     return p - cpn * a / e
 
-
 def xyield(settle, maturity, rate, pr, redemption, freq, basis):
     if maturity <= settle or pr <= 0:
         return None
@@ -179,7 +170,6 @@ def xyield(settle, maturity, rate, pr, redemption, freq, basis):
         else:
             hi = mid
     return (lo + hi) / 2
-
 
 @dataclass
 class Meta:
@@ -198,14 +188,11 @@ class Meta:
     currency: str
     unit_value: int
 
-
 def _build_index():
     idx = {}
     for row in PRODUCTS_RAW:
-        # Failsafe pad if any row in the JSON is ever accidentally malformed/missing elements
         if len(row) < 9:
             row = row + [None] * (9 - len(row))
-            
         code, issued, maturity, coupon, cday, m1, m2, fad, fcd = row[:9]
         prefix = code[:2]
         semi = prefix in ("FR", "IN", "PB", "US")
@@ -221,18 +208,14 @@ def _build_index():
         )
     return idx
 
-
 PRODUCT_INDEX = _build_index()
 PRODUCT_CODES = sorted(PRODUCT_INDEX)
-
 
 def product_meta(code):
     return PRODUCT_INDEX.get((code or "").strip().upper())
 
-
 class SimError(Exception):
     pass
-
 
 def _bracket_coupons(meta: Meta, settlement: int):
     fm = meta.freq_months
@@ -247,12 +230,10 @@ def _bracket_coupons(meta: Meta, settlement: int):
         last = edate(last, -fm)
     return last, edate(last, fm)
 
-
 def _first_coupon_window(meta: Meta, settlement: int) -> bool:
     return (meta.prefix == "IN"
             and meta.first_accrual is not None and meta.first_coupon is not None
             and meta.first_accrual < settlement < meta.first_coupon)
-
 
 def _resolve_coupons(meta: Meta, settlement: int, is_perdana: bool):
     if is_perdana:
@@ -261,7 +242,6 @@ def _resolve_coupons(meta: Meta, settlement: int, is_perdana: bool):
     if _first_coupon_window(meta, settlement):
         return meta.first_accrual, meta.first_coupon
     return _bracket_coupons(meta, settlement)
-
 
 def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
                    nominal, px, is_perdana, round_accrual=True):
@@ -297,7 +277,6 @@ def _accrued_block(meta: Meta, last_coupon, next_coupon, settlement,
     total = trunc(gross) if meta.currency == "IDR" else gross
     return dict(units=units, days=days, per_unit=per_unit, rounded=rounded,
                 accrued=accrued, total=total)
-
 
 def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
                    settlement, nominal, units, accrued, horizon,
@@ -418,7 +397,6 @@ def _coupon_stream(meta: Meta, *, last_coupon, next_coupon, second_coupon,
                 first_gross=first_gross, per_period_net=per_period_net,
                 total_net=total_net, total_gross=total_gross)
 
-
 def _schedule(start, freq_months, periods, first_amount, later_amount, stop):
     rows, d = start
     rows = []
@@ -429,7 +407,6 @@ def _schedule(start, freq_months, periods, first_amount, later_amount, stop):
             break
         d = edate(d, freq_months)
     return rows
-
 
 def simulate_beli(code, market, settlement, nominal, px):
     meta = product_meta(code)
@@ -480,7 +457,6 @@ def simulate_beli(code, market, settlement, nominal, px):
         schedule=_schedule(next_c, meta.freq_months, s["periods"],
                            s["first_net"], s["per_period_net"], meta.maturity),
     )
-
 
 def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sell_price):
     meta = product_meta(code)
@@ -568,7 +544,6 @@ def simulate_jual(code, buy_settlement, nominal, buy_price, sell_settlement, sel
                            to_sale["first_net"], to_sale["per_period_net"], sell_last),
     )
 
-
 def simulate_switching(code1, buy_settlement1, nominal1, buy_price1,
                        sell_settlement1, sell_price1,
                        code2, settlement2, maturity2, nominal2, price2):
@@ -638,7 +613,6 @@ def simulate_switching(code1, buy_settlement1, nominal1, buy_price1,
         schedule2=_schedule(next2, meta2.freq_months, periods2, gross2, net2, maturity2),
     )
 
-
 def money(value, currency="IDR", decimals=None):
     if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
         return "—"
@@ -648,18 +622,15 @@ def money(value, currency="IDR", decimals=None):
     symbol = "Rp" if currency == "IDR" else "$"
     return f"{sign}{symbol} {body}"
 
-
 def pct(value, decimals=2):
     if value is None or not isinstance(value, (int, float)) or not math.isfinite(value):
         return "—"
     return f"{value * 100:,.{decimals}f}%".replace(",", "\u00a0")
 
-
 def num(value, decimals=0):
     if value is None:
         return "—"
     return f"{value:,.{decimals}f}".replace(",", "\u00a0")
-
 
 def parse_number(text):
     if text is None:
@@ -679,7 +650,6 @@ def parse_number(text):
     except ValueError:
         return None
 
-
 def _full_width():
     import inspect
     try:
@@ -690,9 +660,7 @@ def _full_width():
         pass
     return {"use_container_width": True}
 
-
 FULL_WIDTH = _full_width()
-
 
 def money_input(label, default, key, cur_hint="Rp"):
     raw = st.text_input(label, default, key=key)
@@ -703,25 +671,11 @@ def money_input(label, default, key, cur_hint="Rp"):
         st.caption("⚠️ Angka tidak dikenali")
     return raw
 
-
-INK = "#0f2233"
-MUTED = "#5c7085"
-LINE = "#dbe3ea"
-ACCENT = "#0e7c6b"
-LOSS = "#b4342a"
-MARKER = "#ffd400"
-SANS = "DejaVu Sans"
-MONO = "DejaVu Sans Mono"
-
-
 def _paren(v):
     if v is None:
         return "—"
     body = f"{abs(v):,.2f}"
     return f"({body})" if v < 0 else body
-
-
-from matplotlib.patches import FancyBboxPatch
 
 _EX_BLACK = "#111111"
 _EX_HAIR = "#e4eaef"
@@ -738,12 +692,10 @@ DISCLAIMER_FULL = [
     "Perhitungan ini belum dipotong biaya (apabila ada).",
 ]
 
-
 def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, price_pct,
                        sim_title="SIMULASI BELI"):
     cur = r["meta"].currency
     meta = r["meta"]
-    sched = r["schedule"]
 
     W = 12.4
     disc_h = 0.26 + len(DISCLAIMER_FULL) * 0.208 + 0.14
@@ -829,22 +781,25 @@ def render_beli_export(r, *, code, market, txn_serial, settle_serial, nominal, p
     plt.close(fig)
     return buf.getvalue()
 
-
 # ---------------------------------------------------------------------------
 # Simple & Easy-to-Understand Export for Simulasi Kredit (Opsi 1 / Opsi 2)
 # ---------------------------------------------------------------------------
 def render_kredit_export(opt_title, data_dict):
-    W = 8.5
+    W = 9.5  # Increased width for larger readability
     ML, MR = 0.55, 0.55
     usable_w = W - ML - MR
 
+    # Calculate optimal disclaimer textwrapping to guarantee size constraint
     wrapped_lines = []
     wrapped_lines.append("DISCLAIMER:")
     for line in DISCLAIMER_FULL:
-        wrapped_lines.extend(textwrap.wrap(line, width=95))
+        wrapped_lines.extend(textwrap.wrap(line, width=130))
 
-    disc_h = 0.28 + len(wrapped_lines) * 0.185 + 0.15
-    H = 5.2 + disc_h
+    disc_h = 0.30 + len(wrapped_lines) * 0.16 + 0.15
+    
+    # Calculate H dynamically ensuring the disclaimer is firmly less than 1/4th the total height
+    H_main = 0.8 + 2.7 + 3.46 + 0.45  # Estimated height for title and 2 sections
+    H = H_main + disc_h
     
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
@@ -855,29 +810,35 @@ def render_kredit_export(opt_title, data_dict):
 
     top = H - 0.45
 
-    def text(x, y, s, size=10, color=INK, weight="normal", ha="left", va="center", family=SANS):
+    def text(x, y, s, size=10.5, color=INK, weight="normal", ha="left", va="center", family=SANS):
         ax.text(x, y, s, fontsize=size, color=color, weight=weight, ha=ha, va=va, family=family)
 
-    text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", size=14, weight="bold", va="top")
-    text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", size=8.5, color=MUTED, ha="right", va="top", family=MONO)
-    top -= 0.35
+    text(ML, top, f"SIMULASI KREDIT OBLIGASI — {opt_title.upper()}", size=17, weight="bold", va="top")
+    text(W - MR, top, f"Tanggal: {dt.date.today():%d-%b-%Y}", size=10, color=MUTED, ha="right", va="top", family=MONO)
+    top -= 0.40
     ax.plot([ML, W - MR], [top, top], color=INK, lw=1.5)
-    top -= 0.35
+    top -= 0.40
 
     def section_header(title, y_pos):
-        ax.add_patch(plt.Rectangle((ML, y_pos - 0.28), usable_w, 0.28, facecolor=_EX_BLACK, edgecolor="none"))
-        text(ML + 0.12, y_pos - 0.14, title, size=9.5, color="white", weight="bold")
-        return y_pos - 0.42
+        ax.add_patch(plt.Rectangle((ML, y_pos - 0.32), usable_w, 0.32, facecolor=_EX_BLACK, edgecolor="none"))
+        text(ML + 0.15, y_pos - 0.16, title, size=12, color="white", weight="bold")
+        return y_pos - 0.46
 
     def add_rows(rows, y_pos):
-        rh = 0.28
-        for lab, val, bold in rows:
+        rh = 0.38 # Taller rows for readability
+        for row in rows:
+            lab = row[0]
+            val = row[1]
+            bold = row[2]
+            color_val = row[3] if len(row) > 3 else INK
+            indent = row[4] if len(row) > 4 else 0.0
+            
             ry = y_pos - rh
             ax.add_patch(plt.Rectangle((ML, ry), usable_w, rh, facecolor="#f9fbfe", edgecolor=_EX_LINE, lw=0.6))
-            text(ML + 0.12, ry + rh/2, lab, size=8.5, weight="bold" if bold else "normal")
-            text(W - MR - 0.12, ry + rh/2, val, size=8.5, weight="bold" if bold else "normal", ha="right", family=MONO)
+            text(ML + 0.15 + indent, ry + rh/2, lab, size=10.5, weight="bold" if bold else "normal")
+            text(W - MR - 0.15, ry + rh/2, val, size=11, weight="bold" if bold else "normal", color=color_val, ha="right", family=MONO)
             y_pos = ry
-        return y_pos - 0.12
+        return y_pos - 0.15
 
     top = section_header("1. PARAMETER KREDIT & INVESTASI", top)
     top = add_rows([
@@ -891,25 +852,29 @@ def render_kredit_export(opt_title, data_dict):
 
     top = section_header("2. ESTIMASI PENDAPATAN & BEBAN", top)
     top = add_rows([
-        ("Bunga Investasi / Tahun (Nett)", data_dict["inv_nett_fmt"], True),
-        ("Bunga Pinjaman / Tahun (Maksimal)", data_dict["pinj_tahun_fmt"], False),
-        ("Cicilan / Bulan (Metode Anuitas - IL)", data_dict["pmt_fmt"], True),
-        ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False),
+        ("Bunga Investasi / Tahun (Nett)", data_dict["inv_nett_fmt"], True, ACCENT),
+        ("  ↳ per Bulan", data_dict["inv_nett_bulan_fmt"], False, ACCENT, 0.2),
+        ("  ↳ per Hari", data_dict["inv_nett_hari_fmt"], False, ACCENT, 0.2),
+        ("Bunga Pinjaman / Tahun (Maksimal)", data_dict["pinj_tahun_fmt"], True, LOSS),
+        ("  ↳ per Bulan", data_dict["pinj_bulan_fmt"], False, LOSS, 0.2),
+        ("  ↳ per Hari", data_dict["pinj_hari_fmt"], False, LOSS, 0.2),
+        ("Cicilan / Bulan (Metode Anuitas - IL)", data_dict["pmt_fmt"], True, LOSS),
+        ("Total Biaya Provisi & Admin", data_dict["tot_biaya_fmt"], False, INK),
     ], top)
 
     box_bottom = 0.35
     box_top = box_bottom + disc_h
     ax.add_patch(plt.Rectangle((ML, box_bottom), usable_w, disc_h, facecolor="white", edgecolor=INK, lw=0.8))
     
-    dy = box_top - 0.20
-    text(ML + 0.15, dy, "DISCLAIMER:", size=7.5, weight="bold")
-    dy -= 0.19
+    dy = box_top - 0.22
+    text(ML + 0.15, dy, "DISCLAIMER:", size=8.5, weight="bold")
+    dy -= 0.22
     for line in DISCLAIMER_FULL:
-        wrapped = textwrap.wrap(line, width=95)
+        wrapped = textwrap.wrap(line, width=130)
         for i, w_line in enumerate(wrapped):
             prefix = "• " if i == 0 else "   "
-            text(ML + 0.20, dy, prefix + w_line, size=6.0, color=MUTED)
-            dy -= 0.175
+            text(ML + 0.20, dy, prefix + w_line, size=7.0, color=MUTED)
+            dy -= 0.16
 
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
@@ -1012,7 +977,6 @@ class _Sheet:
             cy = one(cy, last[0], last[1], last[2])
         return cy
 
-
 def _new_figure(sim_title, W, H):
     fig = plt.figure(figsize=(W, H), dpi=170)
     fig.patch.set_facecolor("white")
@@ -1031,7 +995,6 @@ def _new_figure(sim_title, W, H):
             color=INK, lw=1.6)
     return fig, ax, top - title_h - 0.14
 
-
 def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
     lines = lines if lines is not None else DISCLAIMER_FULL
     box_top = top if top is not None else (0.28 + disc_h)
@@ -1047,7 +1010,6 @@ def _disclaimer_box(ax, W, ML, MR, disc_h, lines=None, top=None):
         ax.text(ML + 0.34, dy, line, fontsize=6.4, color=INK, family=SANS, va="center")
         dy -= 0.208
 
-
 def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
                        sell_txn, sell_settle, sell_price, sim_title="SIMULASI JUAL"):
     cur = r["meta"].currency
@@ -1056,7 +1018,7 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     W, H = 12.4, 11.35 + disc_h
     fig, ax, top = _new_figure(sim_title, W, H)
 
-    ML, MR, gutter = 0.35, 0.35, 0.45
+    ML, MR, gutter = 0.35, 0.45, 0.45
     col_w = (W - ML - MR - gutter) / 2
     rcol_x = ML + col_w + gutter
     s = _Sheet(ax, ML, col_w)
@@ -1136,7 +1098,6 @@ def render_jual_export(r, *, code, buy_txn, buy_settle, nominal, buy_price,
     FigureCanvasAgg(fig).print_png(buf)
     plt.close(fig)
     return buf.getvalue()
-
 
 def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
                             code2, s2, m2, nom2, p2, sim_title="SIMULASI SWITCHING"):
@@ -1256,7 +1217,6 @@ def render_switching_export(r, *, code1, bs1, ss1, nom1, bp1, sp1,
     plt.close(fig)
     return buf.getvalue()
 
-
 CSS = """
 <style>
   .stApp { background: #eef2f5; }
@@ -1312,12 +1272,10 @@ CSS = """
 </style>
 """
 
-
 def _row_html(label, value, tone=None, indent=False, strong=False):
     cls = "ko-row" + (" ko-ind" if indent else "") + (" ko-strong" if strong else "")
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     return f'<div class="{cls}"><span>{label}</span><span class="{vcls}">{value}</span></div>'
-
 
 def card(heading, rows):
     parts = []
@@ -1331,17 +1289,14 @@ def card(heading, rows):
     head = f'<div class="ko-cap" style="margin-bottom:6px">{heading}</div>' if heading else ""
     st.markdown(f'<div class="ko-card">{head}{"".join(parts)}</div>', unsafe_allow_html=True)
 
-
 def big(label, value, sub="", tone=None):
     vcls = "v" + (f" {tone}" if tone in ("gain", "loss") else "")
     st.markdown(f'<div class="ko-big"><span class="l">{label}</span>'
                 f'<span class="{vcls}">{value}</span>'
                 f'<span class="{sub}</span></div>', unsafe_allow_html=True)
 
-
 def tone_of(value):
     return "gain" if value >= 0 else "loss"
-
 
 def show_meta(meta: Meta):
     st.caption(
@@ -1349,7 +1304,6 @@ def show_meta(meta: Meta):
         f"{'bulanan' if meta.frequency == 'Monthly' else 'semesteran'} · "
         f"jatuh tempo {fmt_date(meta.maturity)}"
     )
-
 
 def show_schedule(rows, currency, caption):
     st.markdown(f'<div class="ko-cap">{caption}'
@@ -1365,7 +1319,6 @@ def show_schedule(rows, currency, caption):
         hide_index=True, height=min(38 + len(rows) * 35, 460), **FULL_WIDTH,
     )
 
-
 def png_to_jpg(png_bytes, quality=92):
     from PIL import Image
     im = Image.open(io.BytesIO(png_bytes))
@@ -1380,12 +1333,10 @@ def png_to_jpg(png_bytes, quality=92):
     im.save(out, format="JPEG", quality=quality, subsampling=0, optimize=True)
     return out.getvalue()
 
-
 def export_filename(sim_label, seri):
     stamp = f"{dt.date.today():%d-%b-%Y}"
     safe = "".join(c for c in f"{sim_label}_{seri}_{stamp}" if c not in '\\/:*?"<>|')
     return f"{safe}.jpg"
-
 
 def export_section(png_factory, sim_label, seri, state_key):
     import base64
@@ -1419,7 +1370,6 @@ def export_section(png_factory, sim_label, seri, state_key):
         mime="image/jpeg",
         **FULL_WIDTH,
     )
-
 
 def tab_beli():
     left, right = st.columns([5, 6], gap="large")
@@ -1475,7 +1425,6 @@ def tab_beli():
                                    settle_serial=to_serial(settle), nominal=nominal, price_pct=price_in),
         "SIMULASI BELI", code, "b_export")
 
-
 def tab_jual():
     left, right = st.columns([5, 6], gap="large")
     with left:
@@ -1522,7 +1471,6 @@ def tab_jual():
                                    nominal=nominal, buy_price=buy_price, sell_txn=to_serial(sell_settle) - 2,
                                    sell_settle=to_serial(sell_settle), sell_price=sell_price),
         "SIMULASI JUAL", code, "j_export")
-
 
 def tab_switching():
     left, right = st.columns([5, 6], gap="large")
@@ -1575,7 +1523,6 @@ def tab_switching():
                                             m2=to_serial(m2), nom2=nom2, p2=p2),
             "SIMULASI SWITCHING", f"{code1}-{code2}", "s_export")
 
-
 def tab_kredit():
     st.markdown('<div class="ko-cap" style="margin-bottom:12px;">Simulasi Kredit Agunan Obligasi</div>', unsafe_allow_html=True)
     left, right = st.columns(2, gap="large")
@@ -1624,8 +1571,12 @@ def tab_kredit():
         
         inv_gross = nom * meta.coupon
         inv_nett = inv_gross * (1 - TAX)
+        inv_nett_bulan = inv_nett / 12.0
+        inv_nett_hari = inv_nett / 365.0
         
         pinj_tahun = plafon * bunga_kredit
+        pinj_bulan = pinj_tahun / 12.0
+        pinj_hari = pinj_tahun / 365.0
         
         if tenor > 0:
             n = int(tenor * 12)
@@ -1640,29 +1591,37 @@ def tab_kredit():
         st.markdown('<div class="ko-cap" style="margin-top:16px;">Ringkasan Parameter</div>', unsafe_allow_html=True)
         card(None, [
             ("Kupon Produk", pct(meta.coupon, 3)),
-            ("Plafon Kredit", money(plafon, cur, decimals=0), None, False, True),
-            ("Total Biaya (Provisi + Admin)", money(tot_biaya, cur, decimals=0), "loss", False, True)
+            ("Plafon Kredit", money(plafon, cur), None, False, True)
         ])
         
         st.markdown('<div class="ko-cap">Simulasi Pendapatan & Beban</div>', unsafe_allow_html=True)
         card(None, [
-            ("Bunga Investasi / Tahun (Nett)", money(inv_nett, cur, decimals=0), "gain", False, True),
-            ("Bunga Pinjaman / Tahun (Maksimal)", money(pinj_tahun, cur, decimals=0)),
-            ("Cicilan / Bulan (Metode Anuitas - IL)", money(pmt, cur, decimals=0), "loss", False, True)
+            ("Bunga Investasi / Tahun (Nett)", money(inv_nett, cur), "gain", False, True),
+            ("↳ per Bulan", money(inv_nett_bulan, cur), "gain", True, False),
+            ("↳ per Hari", money(inv_nett_hari, cur), "gain", True, False),
+            ("Bunga Pinjaman / Tahun (Maksimal)", money(pinj_tahun, cur), "loss", False, True),
+            ("↳ per Bulan", money(pinj_bulan, cur), "loss", True, False),
+            ("↳ per Hari", money(pinj_hari, cur), "loss", True, False),
+            ("Cicilan / Bulan (Metode Anuitas - IL)", money(pmt, cur), "loss", False, True),
+            ("Total Biaya Provisi & Admin", money(tot_biaya, cur), None, False, False)
         ])
         
         export_data = {
             "code": code,
             "currency": cur,
-            "nominal_fmt": money(nom, cur, decimals=0),
+            "nominal_fmt": money(nom, cur),
             "ltv": ltv,
-            "plafon_fmt": money(plafon, cur, decimals=0),
+            "plafon_fmt": money(plafon, cur),
             "bunga_kredit": bunga_kredit,
             "tenor": tenor,
-            "inv_nett_fmt": money(inv_nett, cur, decimals=0),
-            "pinj_tahun_fmt": money(pinj_tahun, cur, decimals=0),
-            "pmt_fmt": money(pmt, cur, decimals=0),
-            "tot_biaya_fmt": money(tot_biaya, cur, decimals=0),
+            "inv_nett_fmt": money(inv_nett, cur),
+            "inv_nett_bulan_fmt": money(inv_nett_bulan, cur),
+            "inv_nett_hari_fmt": money(inv_nett_hari, cur),
+            "pinj_tahun_fmt": money(pinj_tahun, cur),
+            "pinj_bulan_fmt": money(pinj_bulan, cur),
+            "pinj_hari_fmt": money(pinj_hari, cur),
+            "pmt_fmt": money(pmt, cur),
+            "tot_biaya_fmt": money(tot_biaya, cur),
         }
 
         st.divider()
