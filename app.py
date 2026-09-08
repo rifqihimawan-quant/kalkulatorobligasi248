@@ -1753,19 +1753,77 @@ CSS = """
   .ko-card:empty { display:none; }
   .stDivider { margin:0.4rem 0; }
 
-  /* Dropdowns: white text on a dark control so the selection reads clearly on
-     mobile. Scoped to the CLOSED select box only — the open option list below
-     stays dark-on-white so it never becomes white-on-white. */
+  /* ---- Fillable inputs: uniform white backdrop + dark text ----
+     Every control the user can fill (dropdowns, text, number with steppers,
+     date pickers) gets a white fill and a light border, so slots stand out
+     against the grey page and are easy to navigate on desktop and mobile. */
+
+  /* dropdowns (closed control) */
   div[data-baseweb="select"] > div {
-    background:#0f2233 !important;
-    border-color:#0f2233 !important;
+    background:#ffffff !important;
+    border:1px solid #c3ced8 !important;
   }
-  div[data-baseweb="select"] > div * { color:#ffffff !important; }
-  div[data-baseweb="select"] svg { fill:#ffffff !important; color:#ffffff !important; }
-  div[data-baseweb="select"] input { color:#ffffff !important; caret-color:#ffffff; }
-  /* the popover menu of options keeps dark text on a white background */
-  ul[data-baseweb="menu"] li { color:#0f2233 !important; }
+  div[data-baseweb="select"] > div * { color:#0f2233 !important; }
+  div[data-baseweb="select"] svg { fill:#5c7085 !important; color:#5c7085 !important; }
+  div[data-baseweb="select"] input { color:#0f2233 !important; caret-color:#0f2233; }
+  /* open option list: dark text on white */
   ul[data-baseweb="menu"] { background:#ffffff !important; }
+  ul[data-baseweb="menu"] li { color:#0f2233 !important; }
+
+  /* text inputs (nominal, admin) */
+  .stTextInput div[data-baseweb="input"],
+  .stTextInput div[data-baseweb="base-input"] {
+    background:#ffffff !important;
+    border:1px solid #c3ced8 !important;
+    border-radius:8px !important;
+  }
+  .stTextInput input {
+    background:#ffffff !important;
+    color:#0f2233 !important;
+    -webkit-text-fill-color:#0f2233 !important;
+  }
+
+  /* number inputs (price, LTV, rate, tenor, provisi) incl. stepper buttons */
+  .stNumberInput div[data-baseweb="input"],
+  .stNumberInput div[data-baseweb="base-input"] {
+    background:#ffffff !important;
+    border:1px solid #c3ced8 !important;
+    border-radius:8px !important;
+  }
+  .stNumberInput input {
+    background:#ffffff !important;
+    color:#0f2233 !important;
+    -webkit-text-fill-color:#0f2233 !important;
+  }
+  .stNumberInput button {
+    background:#ffffff !important;
+    color:#0f2233 !important;
+    border-left:1px solid #e4eaef !important;
+  }
+  .stNumberInput button:hover { background:#eef2f5 !important; }
+  .stNumberInput button svg { fill:#5c7085 !important; }
+
+  /* date pickers */
+  .stDateInput div[data-baseweb="input"],
+  .stDateInput div[data-baseweb="base-input"] {
+    background:#ffffff !important;
+    border:1px solid #c3ced8 !important;
+    border-radius:8px !important;
+  }
+  .stDateInput input {
+    background:#ffffff !important;
+    color:#0f2233 !important;
+    -webkit-text-fill-color:#0f2233 !important;
+  }
+
+  /* focus ring for whichever input is active */
+  div[data-baseweb="select"] > div:focus-within,
+  .stTextInput div[data-baseweb="input"]:focus-within,
+  .stNumberInput div[data-baseweb="input"]:focus-within,
+  .stDateInput div[data-baseweb="input"]:focus-within {
+    border-color:#0e7c6b !important;
+    box-shadow:0 0 0 2px rgba(14,124,107,.15) !important;
+  }
 </style>
 """
 
