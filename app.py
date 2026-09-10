@@ -1622,12 +1622,10 @@ def render_kredit_export(r, *, code, prov_pct, sim_title="SIMULASI KREDIT"):
     meta = r["meta"]
     disc_h = 0.26 + len(DISCLAIMER_KREDIT) * 0.208 + 0.14
 
-    W = 8.9
-    # depth is fixed (known number of rows); size the canvas to fit content + box
-    _content = 7.75
+    W = 9.6
+    _content = 7.80
     H = 0.94 + _content + disc_h + 0.30
     fig, ax, top = _new_figure(sim_title, W, H)
-    # date just under the header rule, right-aligned, clear of the band text
     ax.text(W - 0.35, top - 0.02, f"Tanggal: {fmt_date_en(to_serial(dt.date.today()))}",
             fontsize=8.5, color=MUTED, family=MONO, ha="right", va="top")
     top -= 0.30
@@ -1637,71 +1635,118 @@ def render_kredit_export(r, *, code, prov_pct, sim_title="SIMULASI KREDIT"):
     s = _Sheet(ax, x, w)
     y = top
 
-    def krow(cy, lab, val, *, indent=False, strong=False, tone=None, rh=0.30):
+    def cell(px, pw, cy, lab, val, *, indent=False, strong=False, tone=None, rh=0.30,
+             lab_size=9, val_size=9.5):
         ry = cy - rh
-        ax.add_patch(plt.Rectangle((x, ry), w, rh, facecolor=_EX_PANEL if strong else "white",
+        ax.add_patch(plt.Rectangle((px, ry), pw, rh, facecolor=_EX_PANEL if strong else "white",
                      edgecolor=_EX_LINE, lw=0.6))
         col = {"gain": _EX_GAIN, "loss": _EX_LOSS}.get(tone, INK)
         lab_txt = ("   \u21b3 " + lab) if indent else lab
-        s.text(x + 0.12, ry + rh / 2, lab_txt, size=9,
-               weight="bold" if strong else "normal",
-               color=MUTED if indent else INK)
-        s.text(x + w - 0.12, ry + rh / 2, val, size=9.5,
+        s.text(px + 0.12, ry + rh / 2, lab_txt, size=lab_size,
+               weight="bold" if strong else "normal", color=MUTED if indent else INK)
+        s.text(px + pw - 0.12, ry + rh / 2, val, size=val_size,
                weight="bold" if strong else "normal", ha="right", family=MONO, color=col)
         return ry
 
-    # ===== Section 1: parameters =====
+    # ===== Section 1: parameters (incl. provisi & admin) =====
     y = s.bar(x, y, w, "1.  PARAMETER KREDIT & INVESTASI", h=0.36, size=11) - 0.12
-    y = krow(y, "Produk Obligasi", code)
-    y = krow(y, f"Nominal Investasi ({cur})", _kmoney(r["nominal"], cur))
-    y = krow(y, "Loan to Value (LTV)", f"{r['ltv'] * 100:.1f}%")
-    y = krow(y, "Plafon Kredit (Nominal × LTV)", _kmoney(r["plafon"], cur), strong=True)
-    y = krow(y, "Suku Bunga Kredit (% p.a)", f"{r['loan_rate'] * 100:.2f}%")
-    y = krow(y, "Pajak Kupon", "0% (INDON/INDOIS)" if r["tax"] == 0 else "10% (obligasi IDR)")
-    y = krow(y, "Tenor Pinjaman", f"{r['tenor_years']:.1f} tahun ({r['tenor_months']} bulan)")
+    y = cell(x, w, y, "Produk Obligasi", code)
+    y = cell(x, w, y, f"Nominal Investasi ({cur})", _kmoney(r["nominal"], cur))
+    y = cell(x, w, y, "Loan to Value (LTV)", f"{r['ltv'] * 100:.1f}%")
+    y = cell(x, w, y, "Plafon Kredit (Nominal × LTV)", _kmoney(r["plafon"], cur), strong=True)
+    y = cell(x, w, y, "Suku Bunga Kredit (% p.a)", f"{r['loan_rate'] * 100:.2f}%")
+    y = cell(x, w, y, "Pajak Kupon", "0% (INDON/INDOIS)" if r["tax"] == 0 else "10% (obligasi IDR)")
+    y = cell(x, w, y, "Tenor Pinjaman", f"{r['tenor_years']:.1f} tahun ({r['tenor_months']} bulan)")
+    y = cell(x, w, y, f"Biaya Provisi ({pct(prov_pct, 2)} × plafon)", _kmoney(r["provision"], cur))
+    y = cell(x, w, y, "Biaya Admin", _kmoney(r["admin_fee"], cur))
+    y = cell(x, w, y, "Total Biaya Provisi & Admin", _kmoney(r["total_fees"], cur), strong=True)
     y -= 0.22
 
-    # ===== Section 2: income vs expense =====
-    y = s.bar(x, y, w, "2.  ESTIMASI PENDAPATAN & BEBAN", h=0.36, size=11) - 0.12
-    y = krow(y, "Bunga Investasi / Tahun (Nett)", _kmoney(r["coupon_net_yr"], cur),
-             strong=True, tone="gain")
-    y = krow(y, "per Bulan", _kmoney(r["inv_month"], cur), indent=True, tone="gain")
-    y = krow(y, "per Hari", _kmoney(r["inv_day"], cur), indent=True, tone="gain")
-    y = krow(y, "Bunga Pinjaman / Tahun (Maksimal)", _kmoney(r["loan_interest_yr"], cur),
-             strong=True, tone="loss")
-    y = krow(y, "per Bulan", _kmoney(r["loan_month"], cur), indent=True, tone="loss")
-    y = krow(y, "per Hari", _kmoney(r["loan_day"], cur), indent=True, tone="loss")
-    y = krow(y, f"Cicilan / Bulan (Anuitas, {r['tenor_months']} bln)", _kmoney(r["annuity"], cur),
-             strong=True)
-    y = krow(y, "Total Pembayaran s.d. Lunas", _kmoney(r["total_repay"], cur))
-    y = krow(y, "Total Biaya Provisi & Admin", _kmoney(r["total_fees"], cur))
-    y -= 0.24
+    # ===== Section 2: two side-by-side loan types =====
+    y = s.bar(x, y, w, "2.  ESTIMASI PENDAPATAN & BEBAN", h=0.36, size=11) - 0.14
 
-    # ===== Verdict banner =====
+    gutter = 0.30
+    bw = (w - gutter) / 2
+    lx = x                      # left  = Kredit Lokal (overdraft)
+    rx = x + bw + gutter        # right = Installment Loan (anuitas)
+    col_top = y
+
+    # sub-headers
+    s.bar(lx, col_top, bw, "KREDIT LOKAL (Overdraft)", h=0.30, size=9)
+    s.bar(rx, col_top, bw, "INSTALLMENT LOAN (Anuitas)", h=0.30, size=9)
+    yL = col_top - 0.30 - 0.06
+    yR = col_top - 0.30 - 0.06
+
+    # --- LEFT: KL — interest-only on drawn amount ---
+    yL = cell(lx, bw, yL, "Bunga Investasi / Th (Nett)", _kmoney(r["coupon_net_yr"], cur),
+              strong=True, tone="gain", lab_size=8, val_size=8.5)
+    yL = cell(lx, bw, yL, "per Bulan", _kmoney(r["inv_month"], cur), indent=True,
+              tone="gain", lab_size=7.6, val_size=8)
+    yL = cell(lx, bw, yL, "per Hari", _kmoney(r["inv_day"], cur), indent=True,
+              tone="gain", lab_size=7.6, val_size=8)
+    yL = cell(lx, bw, yL, "Bunga Pinjaman / Th (Maks)", _kmoney(r["loan_interest_yr"], cur),
+              strong=True, tone="loss", lab_size=8, val_size=8.5)
+    yL = cell(lx, bw, yL, "per Bulan", _kmoney(r["loan_month"], cur), indent=True,
+              tone="loss", lab_size=7.6, val_size=8)
+    yL = cell(lx, bw, yL, "per Hari", _kmoney(r["loan_day"], cur), indent=True,
+              tone="loss", lab_size=7.6, val_size=8)
+
+    # KL verdict box (carry)
     carry = r["net_carry_yr"]
     ok = carry >= 0
-    bh = 0.72
-    ax.add_patch(plt.Rectangle((x, y - bh), w, bh, facecolor=_EX_GAIN_BG if ok else _EX_LOSS_BG,
+    vh = 0.86
+    yL -= 0.10
+    ax.add_patch(plt.Rectangle((lx, yL - vh), bw, vh, facecolor=_EX_GAIN_BG if ok else _EX_LOSS_BG,
                  edgecolor=_EX_GAIN if ok else _EX_LOSS, lw=1.2))
-    s.text(x + 0.16, y - 0.24, "SELISIH CARRY / TAHUN", size=8.5, color=MUTED, weight="bold")
-    s.text(x + 0.16, y - 0.50, _kmoney(carry, cur), size=16, family=MONO, weight="bold",
+    s.text(lx + 0.14, yL - 0.20, "SELISIH CARRY / TAHUN", size=7.5, color=MUTED, weight="bold")
+    s.text(lx + 0.14, yL - 0.45, _kmoney(carry, cur), size=13, family=MONO, weight="bold",
            color=_EX_GAIN if ok else _EX_LOSS)
-    verdict = ("Kupon menutup bunga pinjaman" if ok else "Kupon belum menutup bunga pinjaman")
-    s.text(x + w - 0.16, y - 0.30, verdict, size=8.5, ha="right", weight="bold",
-           color=_EX_GAIN if ok else _EX_LOSS)
-    s.text(x + w - 0.16, y - 0.50,
-           f"{_kmoney(abs(r['net_carry_month']), cur)} / bulan", size=9, ha="right",
-           family=MONO, color=_EX_GAIN if ok else _EX_LOSS)
-    y -= bh + 0.10
+    s.text(lx + 0.14, yL - 0.68,
+           ("Kupon menutup bunga" if ok else "Kupon belum menutup bunga")
+           + f"  ({_kmoney(abs(r['net_carry_month']), cur)}/bln)",
+           size=7.2, weight="bold", color=_EX_GAIN if ok else _EX_LOSS)
+    yL -= vh
+
+    # --- RIGHT: IL — annuity + total-interest-vs-coupon over the same tenor ---
+    coupon_over_tenor = r["coupon_net_yr"] * r["tenor_years"]
+    interest_over_tenor = r["total_loan_interest"]
+    il_diff = coupon_over_tenor - interest_over_tenor
+    il_ok = il_diff >= 0
+
+    yR = cell(rx, bw, yR, f"Cicilan / Bulan ({r['tenor_months']} bln)", _kmoney(r["annuity"], cur),
+              strong=True, lab_size=8, val_size=8.5)
+    yR = cell(rx, bw, yR, "Total Pembayaran", _kmoney(r["total_repay"], cur),
+              lab_size=7.8, val_size=8)
+    yR = cell(rx, bw, yR, "Total Bunga (tenor)", _kmoney(interest_over_tenor, cur),
+              tone="loss", lab_size=7.8, val_size=8)
+    yR = cell(rx, bw, yR, "Total Kupon Nett (tenor)", _kmoney(coupon_over_tenor, cur),
+              tone="gain", lab_size=7.8, val_size=8)
+
+    # IL verdict box (interest paid vs coupon received over the full tenor)
+    vh2 = 0.86
+    yR -= 0.10
+    ax.add_patch(plt.Rectangle((rx, yR - vh2), bw, vh2, facecolor=_EX_GAIN_BG if il_ok else _EX_LOSS_BG,
+                 edgecolor=_EX_GAIN if il_ok else _EX_LOSS, lw=1.2))
+    s.text(rx + 0.14, yR - 0.20, f"SELISIH KUPON \u2212 BUNGA ({r['tenor_years']:.1f} TH)",
+           size=7.5, color=MUTED, weight="bold")
+    s.text(rx + 0.14, yR - 0.45, _kmoney(il_diff, cur), size=13, family=MONO, weight="bold",
+           color=_EX_GAIN if il_ok else _EX_LOSS)
+    s.text(rx + 0.14, yR - 0.68,
+           ("Kupon menutup total bunga" if il_ok else "Kupon belum menutup total bunga"),
+           size=7.2, weight="bold", color=_EX_GAIN if il_ok else _EX_LOSS)
+    yR -= vh2
+
+    y = min(yL, yR) - 0.20
 
     # tenor warning line inside the sheet
     if not r["tenor_ok"]:
-        s.text(x, y - 0.12,
+        s.text(x, y - 0.02,
                f"\u26a0  Tenor melebihi batas: fasilitas harus berakhir \u2264 1 bulan sebelum "
                f"JT obligasi ({fmt_date_en(meta.maturity)}). Maks \u2248 {r['max_tenor_months']} bulan.",
                size=7.6, color=_EX_LOSS, weight="bold")
+        y -= 0.26
 
-    _disclaimer_box(ax, W, ML, MR, disc_h, lines=DISCLAIMER_KREDIT)
+    _disclaimer_box(ax, W, ML, MR, disc_h, lines=DISCLAIMER_KREDIT, top=y)
     buf = io.BytesIO()
     FigureCanvasAgg(fig).print_png(buf)
     plt.close(fig)
@@ -2224,46 +2269,73 @@ def tab_kredit():
 
     with left:
         st.markdown('<div class="ko-cap">Parameter kredit</div>', unsafe_allow_html=True)
+        # Every field starts blank ("N/A") so nothing is pre-assumed; the RM
+        # fills what applies and results appear once the essentials are in.
         code = st.selectbox("Nama produk (agunan)", PRODUCT_CODES,
-                            index=PRODUCT_CODES.index("FR0110"), key="k_code")
-        meta = product_meta(code)
-        show_meta(meta)
+                            index=None, placeholder="Pilih obligasi…", key="k_code")
+        meta = product_meta(code) if code else None
+        if meta:
+            show_meta(meta)
 
-        nominal = parse_number(money_input(
-            "Nominal investasi", "1.000.000.000", "k_nominal",
-            cur_hint="Rp" if meta.currency == "IDR" else "$"))
+        nominal = parse_number(st.text_input(
+            "Nominal investasi", value="", placeholder="N/A", key="k_nominal"))
+        if nominal:
+            st.caption(("= Rp " if (meta is None or meta.currency == "IDR") else "= $ ")
+                       + f"{nominal:,.0f}".replace(",", "."))
 
-        # LTV auto-fills from the bond's currency/maturity tier; RM may override.
-        auto_ltv = default_ltv(meta)
-        years = max(0.0, (meta.maturity - to_serial(dt.date.today())) / 365.25)
-        st.caption(
-            f"LTV otomatis **{auto_ltv * 100:.0f}%** "
-            f"({meta.currency}, sisa tenor ±{years:.1f} tahun). "
-            "Ubah bila perlu."
-        )
-        # reset the LTV field to the tier default whenever the bond changes
-        if st.session_state.get("_k_last_code") != code:
-            st.session_state["k_ltv"] = auto_ltv * 100
-            st.session_state["_k_last_code"] = code
-        ltv_pct = st.number_input("Loan to Value / LTV (%)", min_value=1.0, max_value=100.0,
-                                  step=1.0, format="%.1f", key="k_ltv")
+        # LTV auto-fills from the bond's tier the first time a bond is chosen;
+        # RM may override. Left blank until a bond is selected.
+        if meta:
+            auto_ltv = default_ltv(meta)
+            years = max(0.0, (meta.maturity - to_serial(dt.date.today())) / 365.25)
+            if st.session_state.get("_k_last_code") != code:
+                st.session_state["k_ltv"] = auto_ltv * 100
+                st.session_state["_k_last_code"] = code
+            st.caption(f"LTV otomatis **{auto_ltv * 100:.0f}%** "
+                       f"({meta.currency}, sisa tenor ±{years:.1f} tahun). Ubah bila perlu.")
+        ltv_pct = st.number_input("Loan to Value / LTV (%)", min_value=0.0, max_value=100.0,
+                                  value=None, step=1.0, format="%.1f",
+                                  placeholder="N/A", key="k_ltv")
 
         loan_rate = st.number_input("Suku bunga kredit (% p.a)", min_value=0.0, max_value=100.0,
-                                    value=7.50, step=0.05, format="%.4f", key="k_rate",
+                                    value=None, step=0.05, format="%.4f",
+                                    placeholder="N/A", key="k_rate",
                                     help="Diisi manual oleh RM sesuai penawaran fasilitas.")
         tenor = st.number_input("Periode angsuran (tahun)", min_value=0.5, max_value=30.0,
-                                value=3.0, step=0.5, format="%.1f", key="k_tenor")
+                                value=None, step=0.5, format="%.1f",
+                                placeholder="N/A", key="k_tenor")
 
-        with st.expander("Biaya provisi & admin (opsional)"):
-            prov_pct = st.number_input("Provisi (% dari plafon)", min_value=0.0, max_value=100.0,
-                                       value=1.00, step=0.05, format="%.4f", key="k_prov")
-            admin = parse_number(money_input(
-                "Biaya admin (flat)", "0", "k_admin",
-                cur_hint="Rp" if meta.currency == "IDR" else "$")) or 0
+        st.markdown('<div class="ko-cap" style="margin-top:6px">Biaya (opsional)</div>',
+                    unsafe_allow_html=True)
+        prov_pct = st.number_input("Provisi (% dari plafon)", min_value=0.0, max_value=100.0,
+                                   value=None, step=0.05, format="%.4f",
+                                   placeholder="N/A", key="k_prov")
+        admin = parse_number(st.text_input(
+            "Biaya admin (flat)", value="", placeholder="N/A", key="k_admin"))
+
+    # --- require the essentials before computing ---
+    missing = []
+    if not code:
+        missing.append("nama produk")
+    if not nominal or nominal <= 0:
+        missing.append("nominal investasi")
+    if ltv_pct is None or ltv_pct <= 0:
+        missing.append("LTV")
+    if loan_rate is None:
+        missing.append("suku bunga kredit")
+    if tenor is None or tenor <= 0:
+        missing.append("periode angsuran")
+    if missing:
+        with right:
+            st.info("Lengkapi " + ", ".join(missing) + " untuk melihat hasil simulasi.")
+        return
+
+    prov = (prov_pct or 0) / 100
+    admin_val = admin or 0
 
     try:
         r = simulate_kredit(code, nominal, ltv_pct / 100, loan_rate / 100, tenor,
-                            prov_pct / 100, admin)
+                            prov, admin_val)
     except SimError as exc:
         with right:
             st.info(str(exc))
@@ -2274,36 +2346,40 @@ def tab_kredit():
         card("Ringkasan fasilitas", [
             ("Plafon kredit (Nominal × LTV)", money(r["plafon"], cur), None, False, True),
             ("Pajak kupon", "0% (INDON/INDOIS)" if r["tax"] == 0 else "10% (obligasi IDR)"),
+            (f"Provisi ({pct(prov, 2)} × plafon)", money(r["provision"], cur)),
+            ("Biaya admin", money(r["admin_fee"], cur)),
+            ("Total biaya provisi & admin", money(r["total_fees"], cur), None, False, True),
         ])
 
-    with right:
-        st.markdown('<div class="ko-cap">Perbandingan tahunan</div>', unsafe_allow_html=True)
-        a, b = st.columns(2)
-        with a:
-            big("Bunga investasi / th (nett)", money(r["coupon_net_yr"], cur),
-                f"{money(r['inv_month'], cur)}/bln", "gain")
-        with b:
-            big("Bunga pinjaman / th (maks)", money(r["loan_interest_yr"], cur),
-                f"{money(r['loan_month'], cur)}/bln", "loss")
+    coupon_over_tenor = r["coupon_net_yr"] * r["tenor_years"]
+    il_diff = coupon_over_tenor - r["total_loan_interest"]
 
+    with right:
+        st.markdown('<div class="ko-cap">Kredit Lokal (overdraft) — bunga saja</div>',
+                    unsafe_allow_html=True)
         big("Selisih carry / tahun", money(r["net_carry_yr"], cur),
             (f"Kupon menutup bunga pinjaman — surplus {money(r['net_carry_month'], cur)}/bln"
              if r["net_carry_yr"] >= 0
              else f"Kupon belum menutup bunga — defisit {money(abs(r['net_carry_month']), cur)}/bln"),
             tone_of(r["net_carry_yr"]))
-
-        card("Beban pinjaman", [
-            ("Bunga pinjaman / tahun", money(r["loan_interest_yr"], cur)),
-            ("Bunga pinjaman / bulan", money(r["loan_month"], cur), None, True),
-            ("Bunga pinjaman / hari", money(r["loan_day"], cur), None, True),
-            (f"Cicilan / bulan (anuitas, {r['tenor_months']} bln)", money(r["annuity"], cur), None, False, True),
-            ("Total pembayaran", money(r["total_repay"], cur), None, True),
-            ("Total bunga selama tenor", money(r["total_loan_interest"], cur), None, True),
+        card(None, [
+            ("Bunga investasi / th (nett)", money(r["coupon_net_yr"], cur), "gain"),
+            ("Bunga pinjaman / th (maks)", money(r["loan_interest_yr"], cur), "loss"),
+            ("Bunga pinjaman / bulan", money(r["loan_month"], cur), "loss", True),
+            ("Bunga pinjaman / hari", money(r["loan_day"], cur), "loss", True),
         ])
-        card("Biaya di muka", [
-            (f"Provisi ({pct(prov_pct / 100, 2)} × plafon)", money(r["provision"], cur)),
-            ("Biaya admin", money(r["admin_fee"], cur)),
-            ("Total biaya provisi & admin", money(r["total_fees"], cur), None, False, True),
+
+        st.markdown('<div class="ko-cap">Installment Loan (anuitas) — cicilan tetap</div>',
+                    unsafe_allow_html=True)
+        big(f"Selisih kupon − bunga ({r['tenor_years']:.1f} th)", money(il_diff, cur),
+            ("Total kupon menutup total bunga selama tenor"
+             if il_diff >= 0 else "Total kupon belum menutup total bunga selama tenor"),
+            tone_of(il_diff))
+        card(None, [
+            (f"Cicilan / bulan ({r['tenor_months']} bln)", money(r["annuity"], cur), None, False, True),
+            ("Total pembayaran s.d. lunas", money(r["total_repay"], cur)),
+            ("Total bunga (selama tenor)", money(r["total_loan_interest"], cur), "loss", True),
+            ("Total kupon nett (selama tenor)", money(coupon_over_tenor, cur), "gain", True),
         ])
 
     if not r["tenor_ok"]:
@@ -2319,7 +2395,7 @@ def tab_kredit():
     st.markdown('<div class="ko-cap">Gambar untuk dibagikan</div>', unsafe_allow_html=True)
     export_section(
         lambda: render_kredit_export(
-            r, code=code, prov_pct=prov_pct / 100, sim_title="SIMULASI KREDIT"),
+            r, code=code, prov_pct=prov, sim_title="SIMULASI KREDIT"),
         "SIMULASI KREDIT", code, "k_export")
 
 
