@@ -6,7 +6,7 @@ originating cell reference so the two can be diffed. The hidden calculation
 blocks in the workbook are rows 202-330 (Simulasi Beli), 201-388 (Simulasi
 Jual) and 208-500 (Simulasi Switching); the product master table is C333:R497.
 
-checking with VSC
+assalamuaikum everyone
 
 Run locally:  streamlit run app.py
 """
