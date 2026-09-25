@@ -265,7 +265,7 @@ def fetch_bond_prices():
         headers={"User-Agent": _UA,
                  "Accept": "text/html,application/xhtml+xml",
                  "Accept-Language": "id-ID,id;q=0.9,en;q=0.8"},
-        timeout=30,
+        timeout=12,
     )
     resp.raise_for_status()
     resp.encoding = resp.encoding or "utf-8"
@@ -530,6 +530,18 @@ def tab_price_list():
 
     if refresh:
         fetch_bond_prices.clear()
+        st.session_state["pl_loaded"] = True
+
+    # Streamlit re-runs the whole script on every interaction, and st.tabs
+    # renders every tab body regardless of which one is on screen. An
+    # unconditional network call here would therefore block the four
+    # simulation tabs too, on every click. Fetch only when asked.
+    if not st.session_state.get("pl_loaded"):
+        st.info("Tekan tombol di bawah untuk mengambil daftar harga terbaru dari situs BCA.")
+        if st.button("Muat daftar harga", type="primary", key="pl_load", **_full_width()):
+            st.session_state["pl_loaded"] = True
+            st.rerun()
+        return
 
     try:
         with st.spinner("Mengambil daftar harga…"):
